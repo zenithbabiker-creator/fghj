@@ -1,0 +1,142 @@
+{
+  "users": [
+    {
+      "id": "usr_1",
+      "username": "admin",
+      "password": "admin123",
+      "name": "المدير العام - ناصر",
+      "role": "GENERAL_MANAGER",
+      "gmail": "zenithbabiker@gmail.com",
+      "createdAt": "2026-08-04T06:43:03.503Z"
+    },
+    {
+      "id": "usr_2",
+      "username": "wh_manager",
+      "password": "wh123",
+      "name": "أمين المخزن الرئيسي - أحمد مصطفى",
+      "role": "WAREHOUSE_MANAGER",
+      "gmail": "warehouse.nasser@gmail.com",
+      "createdAt": "2026-08-04T06:43:03.503Z"
+    }
+  ],
+  "products": [
+    {
+      "id": "prd_1",
+      "code": "NASSER-101",
+      "name": "ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3",
+      "category": "أجهزة ومعدات",
+      "stock": 45,
+      "minStock": 5,
+      "unit": "جهاز",
+      "description": "ماكينة إسبرسو 3 مجموعاتستانلس ستيل مزودة بمضخة ضغط إيطالية high-pressure",
+      "updatedAt": "2026-08-08T12:00:00.000Z"
+    },
+    {
+      "id": "prd_2",
+      "code": "NASSER-102",
+      "name": "طاحونة حبوب القهوة الصناعية 1500W دقيقة التنعيم",
+      "category": "أجهزة ومعدات",
+      "stock": 22,
+      "minStock": 3,
+      "unit": "قطعة",
+      "description": "طاحونة شفرات تيتانيوم سريعة بضبط ميكرومتري",
+      "updatedAt": "2026-08-08T12:00:00.000Z"
+    },
+    {
+      "id": "prd_3",
+      "code": "NASSER-103",
+      "name": "طابعة فواتير حرارية عالية السرعة 80mm USB/LAN",
+      "category": "إلكترونيات ومعدات",
+      "stock": 18,
+      "minStock": 4,
+      "unit": "طابعة",
+      "description": "طابعة فواتير حرارية تدعم قص الورق التلقائي والطباعة السريعة",
+      "updatedAt": "2026-08-08T12:00:00.000Z"
+    },
+    {
+      "id": "prd_4",
+      "code": "NASSER-104",
+      "name": "ميزان إلكتروني ديجيتال دقيق للوزن والجرعات 0.1g",
+      "category": "أجهزة قياس",
+      "stock": 4,
+      "minStock": 5,
+      "unit": "ميزان",
+      "description": "ميزان إلكتروني ذكي بشاشة LCD مضاءة وشاحن USB",
+      "updatedAt": "2026-08-08T12:00:00.000Z"
+    },
+    {
+      "id": "prd_5",
+      "code": "NASSER-105",
+      "name": "فلتر تنقية وتقطير المياه خماسي المراحل للمقاهي",
+      "category": "مستلزمات ومستهلكات",
+      "stock": 60,
+      "minStock": 10,
+      "unit": "طقم",
+      "description": "نظام فلترة مياه عالي الجودة لإزالة الشوائب والأملاح",
+      "updatedAt": "2026-08-08T12:00:00.000Z"
+    },
+    {
+      "id": "prd_6",
+      "code": "NASSER-106",
+      "name": "مقبض ضغط القهوة اليدوي (Tamper) استانلس ستيل 58mm",
+      "category": "ملحقات ومستلزمات",
+      "stock": 85,
+      "minStock": 15,
+      "unit": "قطعة",
+      "description": "تامبر احترافي مصمّم لتوزيع الضغط المتساوي على البن",
+      "updatedAt": "2026-08-08T12:00:00.000Z"
+    }
+  ],
+  "movements": [
+    {
+      "id": "mvt_1786183000000",
+      "productId": "prd_1",
+      "productCode": "NASSER-101",
+      "productName": "ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3",
+      "type": "IN",
+      "quantity": 10,
+      "previousStock": 35,
+      "newStock": 45,
+      "reason": "توريد شحنة استيراد جديدة للمخزن الرئيسية",
+      "referenceNo": "REC-9941",
+      "operatorName": "أمين المخزن الرئيسي - أحمد مصطفى",
+      "timestamp": "2026-08-08T10:00:00.000Z"
+    }
+  ],
+  "logs": [
+    {
+      "id": "log_1786182481107_psm9",
+      "timestamp": "2026-08-08T09:48:01.107Z",
+      "username": "admin",
+      "role": "GENERAL_MANAGER",
+      "action": "تسجيل دخول",
+      "details": "تم تسجيل الدخول بنجاح للمستخدم المدير العام - ناصر",
+      "type": "INFO"
+    },
+    {
+      "id": "log_1786182074340_f2yj",
+      "timestamp": "2026-08-08T09:41:14.340Z",
+      "username": "admin",
+      "role": "GENERAL_MANAGER",
+      "action": "تسجيل دخول",
+      "details": "تم تسجيل الدخول بنجاح للمستخدم المدير العام - ناصر",
+      "type": "INFO"
+    },
+    {
+      "id": "log_1",
+      "timestamp": "2026-08-04T06:43:03.503Z",
+      "username": "النظام",
+      "role": "GENERAL_MANAGER",
+      "action": "تشغيل النظام",
+      "details": "تم بدء تشغيل قاعدة بيانات إدارة المخازن والمخزون لشركة NASSER بنجاح",
+      "type": "INFO"
+    }
+  ],
+  "settings": {
+    "googleSheetUrl": "https://docs.google.com/spreadsheets/d/1NasserCompanyConfig/edit#gid=0",
+    "rateLimitThreshold": 15,
+    "appName": "شركة NASSER - نظام إدارة المخازن والمخزون",
+    "companyAddress": "الخرطوم - شارع الستين الرئيسي",
+    "companyPhone": "+249 91 234 5678"
+  }
+}

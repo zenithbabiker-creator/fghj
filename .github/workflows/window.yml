@@ -1,0 +1,134 @@
+name: Build Windows Application (.exe) & Installer
+
+# ==========================================================
+# شركة NASSER - نظام إدارة المخازن والمبيعات
+# GitHub Actions Workflow لبناء مثبت ويندوز كامل (.exe Installer)
+# ==========================================================
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: 🖥️ Build Windows Application & Installer
+    runs-on: windows-latest
+
+    steps:
+      # 1. جلب كود المشروع من GitHub
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. إعداد بيئة Node.js
+      - name: Set up Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 3. إعداد بيئة بايثون
+      - name: Set up Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 4. تثبيت مكتبات Node النظيف (Clean Install) وتجميع التطبيق
+      - name: Clean Install Node Dependencies & Build
+        run: |
+          rm -Force -ErrorAction SilentlyContinue package-lock.json
+          rm -Force -ErrorAction SilentlyContinue -Recurse node_modules
+          npm install --legacy-peer-deps
+          npm run build
+
+      # 5. استخراج سكريبت بايثون الرئيسي تلقائياً من المولد
+      - name: Extract Python Desktop Script (nasser_company_app.py)
+        run: |
+          npx tsx -e "import { generatePySideScript } from './src/lib/pysideScriptGenerator.ts'; import fs from 'fs'; fs.writeFileSync('nasser_company_app.py', generatePySideScript(), 'utf-8'); console.log('Successfully generated nasser_company_app.py');"
+
+      # 6. تثبيت مكتبات بايثون
+      - name: Install Python Desktop Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if (-Not (Test-Path requirements.txt)) { New-Item -ItemType File -Path requirements.txt -Force }
+          pip install PySide6 pyinstaller pywebview pillow
+          pip install -r requirements.txt
+
+      # 7. توليد الأيقونة الخارجية لمكتبات الويندوز مع إجبار ترميز UTF-8
+      - name: Generate High-Res External Icon (assets/icon.ico)
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          python scripts/create_icon.py assets/icon.ico
+
+      # 8. تحويل بايثون إلى مجلد كامل للبرنامج مع دمج حزمة الويب dist (--onedir --add-data)
+      - name: Compile Desktop App to Directory
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          pyinstaller --noconsole --onedir --icon=assets/icon.ico --add-data "dist;dist" --name="NASSER_Company_App" nasser_company_app.py
+
+      # 9. إنشاء ملف إعدادات التثبيت (Inno Setup Script) تلقائياً
+      - name: Create Inno Setup Script
+        run: |
+          $innoScript = @"
+          [Setup]
+          AppName=شركة ناصر - إدارة المخازن والمبيعات
+          AppVersion=1.0
+          DefaultDirName={autopf}\NasserCompanyApp
+          DefaultGroupName=شركة ناصر
+          UninstallDisplayIcon={app}\NASSER_Company_App.exe
+          Compression=lzma2
+          SolidCompression=yes
+          OutputDir=installer_output
+          OutputBaseFilename=Nasser_Company_Setup
+          SetupIconFile=assets\icon.ico
+
+          [Tasks]
+          Name: "desktopicon"; Description: "إنشاء اختصار على سطح المكتب (Desktop Shortcut)"; GroupDescription: "اختصارات إضافية:"
+
+          [Files]
+          Source: "dist\NASSER_Company_App\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "assets\icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
+
+          [Icons]
+          Name: "{group}\شركة ناصر - إدارة المخازن والمبيعات"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"
+          Name: "{autodesktop}\شركة ناصر - إدارة المخازن والمبيعات"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"
+          Name: "{userdesktop}\شركة ناصر - إدارة المخازن والمبيعات"; Filename: "{app}\NASSER_Company_App.exe"; IconFilename: "{app}\NASSER_Company_App.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+
+          [Run]
+          Filename: "{app}\NASSER_Company_App.exe"; Description: "تشغيل التطبيق الآن"; Flags: nowait postinstall skipifsilent
+          "@
+          Set-Content -Path "setup_script.iss" -Value $innoScript -Encoding UTF8
+
+      # 10. تثبيت وتجميع ملف التثبيت النهائي باستخدام Inno Setup (ISCC)
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build Windows Installer (.exe) with ISCC
+        shell: powershell
+        run: |
+          $isccPath = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-Not (Test-Path $isccPath)) {
+            Write-Error "Inno Setup compiler not found at $isccPath"
+            exit 1
+          }
+          & $isccPath setup_script.iss
+
+      - name: List Produced Installers
+        shell: powershell
+        run: |
+          if (Test-Path 'installer_output') {
+            Get-ChildItem -Path installer_output -Recurse | ForEach-Object { $_.FullName }
+          } else {
+            Write-Host "installer_output directory not found after ISCC run"
+          }
+
+      # 11. رفع برنامج التثبيت النهائي (Nasser_Company_Setup.exe)
+      - name: Upload Windows Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NASSER_Company_Windows_Installer
+          path: installer_output/Nasser_Company_Setup.exe
+          if-no-files-found: error

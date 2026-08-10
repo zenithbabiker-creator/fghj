@@ -1,0 +1,220 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Cairo', 'Tajawal', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom Slim Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Print Styles for Invoices and Delivery Orders */
+@media print {
+  /* Hide non-print controls and navigation */
+  .no-print,
+  button,
+  header,
+  nav,
+  aside,
+  footer {
+    display: none !important;
+  }
+
+  /* Hide background elements by default */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Force visibility, color accuracy and styling on printable element and all descendants */
+  .printable,
+  .print-area,
+  .printable *,
+  .print-area * {
+    visibility: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Position printable canvas to fit paper page perfectly */
+  .printable,
+  .print-area {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    padding: 24px !important;
+    border: 2px solid #0f172a !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    box-shadow: none !important;
+    border-radius: 12px !important;
+    overflow: visible !important;
+    z-index: 999999 !important;
+  }
+
+  /* Preserve flex and grid display properties inside printable area */
+  .printable .flex, .print-area .flex {
+    display: flex !important;
+  }
+
+  .printable .grid, .print-area .grid {
+    display: grid !important;
+  }
+
+  .printable .grid-cols-3, .print-area .grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .printable .items-center, .print-area .items-center {
+    align-items: center !important;
+  }
+
+  .printable .justify-between, .print-area .justify-between {
+    justify-content: space-between !important;
+  }
+
+  .printable .justify-center, .print-area .justify-center {
+    justify-content: center !important;
+  }
+
+  /* Preserve table structures and borders */
+  .printable table, .print-area table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  .printable th, .printable td,
+  .print-area th, .print-area td {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Preserve explicit background colors */
+  .printable .bg-slate-900, .print-area .bg-slate-900 {
+    background-color: #0f172a !important;
+    color: #ffffff !important;
+  }
+
+  .printable .bg-blue-900, .print-area .bg-blue-900 {
+    background-color: #1e3a8a !important;
+    color: #ffffff !important;
+  }
+
+  .printable .bg-slate-50, .print-area .bg-slate-50 {
+    background-color: #f8fafc !important;
+  }
+
+  .printable .bg-blue-50, .print-area .bg-blue-50 {
+    background-color: #eff6ff !important;
+  }
+
+  /* Preserve explicit text colors */
+  .printable .text-white, .print-area .text-white {
+    color: #ffffff !important;
+  }
+
+  .printable .text-slate-900, .print-area .text-slate-900 {
+    color: #0f172a !important;
+  }
+
+  .printable .text-slate-800, .print-area .text-slate-800 {
+    color: #1e293b !important;
+  }
+
+  .printable .text-slate-600, .print-area .text-slate-600 {
+    color: #475569 !important;
+  }
+
+  .printable .text-slate-500, .print-area .text-slate-500 {
+    color: #64748b !important;
+  }
+
+  .printable .text-blue-300, .print-area .text-blue-300 {
+    color: #93c5fd !important;
+  }
+
+  .printable .text-blue-700, .print-area .text-blue-700 {
+    color: #1d4ed8 !important;
+  }
+
+  .printable .text-blue-900, .print-area .text-blue-900 {
+    color: #1e3a8a !important;
+  }
+
+  .printable .text-blue-950, .print-area .text-blue-950 {
+    color: #172554 !important;
+  }
+
+  /* Preserve borders */
+  .printable .border-slate-900, .print-area .border-slate-900 {
+    border-color: #0f172a !important;
+  }
+
+  .printable .border-slate-400, .print-area .border-slate-400 {
+    border-color: #94a3b8 !important;
+  }
+
+  .printable .border-slate-300, .print-area .border-slate-300 {
+    border-color: #cbd5e1 !important;
+  }
+
+  /* Page setup */
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+}
+
+/* Excel Grid System for App Tables */
+table {
+  border-collapse: collapse;
+}
+
+table th,
+table td {
+  border-left: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
+}
+
+table th:first-child,
+table td:first-child {
+  border-right: none;
+}
+
+table th:last-child,
+table td:last-child {
+  border-left: none;
+}
+
+/* Dark Headers Vertical Separators */
+tr.bg-slate-800 th,
+tr.bg-slate-900 th,
+tr.bg-\[\#0F172A\] th,
+thead tr.bg-slate-800 th,
+thead tr.bg-slate-900 th {
+  border-left-color: #334155 !important;
+  border-right-color: #334155 !important;
+}
+

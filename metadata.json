@@ -1,0 +1,8 @@
+{
+  "name": "شركة NASSER - نظام إدارة المخازن والمخزون",
+  "description": "نظام إداري متكامل للسيطرة على حركة المخزون والأصناف والتوريد والتصريف، مع تقارير الجرد المباشر والبحث الذكي والدعم الأوفلاين الشامل",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
