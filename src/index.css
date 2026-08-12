@@ -70,12 +70,15 @@
     visibility: hidden;
   }
 
-  /* Force visibility, color accuracy and styling on printable element and all descendants */
+  /* Force visibility, monochrome color accuracy and crisp styling on printable element and all descendants */
   .printable,
   .print-area,
   .printable *,
   .print-area * {
     visibility: visible !important;
+    color: #000000 !important;
+    background-color: #ffffff !important;
+    border-color: #000000 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
@@ -91,12 +94,12 @@
     max-width: 100% !important;
     box-sizing: border-box !important;
     margin: 0 !important;
-    padding: 28px !important;
-    border: 2px solid #0f172a !important;
+    padding: 24px !important;
+    border: 2px solid #000000 !important;
     background: #ffffff !important;
-    color: #0f172a !important;
+    color: #000000 !important;
     box-shadow: none !important;
-    border-radius: 12px !important;
+    border-radius: 8px !important;
     overflow: visible !important;
     z-index: 999999 !important;
     display: block !important;
@@ -160,73 +163,32 @@
     print-color-adjust: exact !important;
   }
 
-  /* Preserve explicit background colors */
-  .printable .bg-slate-900, .print-area .bg-slate-900 {
-    background-color: #0f172a !important;
-    color: #ffffff !important;
-  }
-
-  .printable .bg-blue-900, .print-area .bg-blue-900 {
-    background-color: #1e3a8a !important;
-    color: #ffffff !important;
-  }
-
-  .printable .bg-slate-50, .print-area .bg-slate-50 {
-    background-color: #f8fafc !important;
-  }
-
+  /* Ensure strictly monochrome pure black text and white backgrounds for all elements when printing */
+  .printable .bg-slate-900, .print-area .bg-slate-900,
+  .printable .bg-blue-900, .print-area .bg-blue-900,
+  .printable .bg-slate-50, .print-area .bg-slate-50,
   .printable .bg-blue-50, .print-area .bg-blue-50 {
-    background-color: #eff6ff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
   }
 
-  /* Preserve explicit text colors */
-  .printable .text-white, .print-area .text-white {
-    color: #ffffff !important;
-  }
-
-  .printable .text-slate-900, .print-area .text-slate-900 {
-    color: #0f172a !important;
-  }
-
-  .printable .text-slate-800, .print-area .text-slate-800 {
-    color: #1e293b !important;
-  }
-
-  .printable .text-slate-600, .print-area .text-slate-600 {
-    color: #475569 !important;
-  }
-
-  .printable .text-slate-500, .print-area .text-slate-500 {
-    color: #64748b !important;
-  }
-
-  .printable .text-blue-300, .print-area .text-blue-300 {
-    color: #93c5fd !important;
-  }
-
-  .printable .text-blue-700, .print-area .text-blue-700 {
-    color: #1d4ed8 !important;
-  }
-
-  .printable .text-blue-900, .print-area .text-blue-900 {
-    color: #1e3a8a !important;
-  }
-
+  .printable .text-white, .print-area .text-white,
+  .printable .text-slate-900, .print-area .text-slate-900,
+  .printable .text-slate-800, .print-area .text-slate-800,
+  .printable .text-slate-600, .print-area .text-slate-600,
+  .printable .text-slate-500, .print-area .text-slate-500,
+  .printable .text-blue-300, .print-area .text-blue-300,
+  .printable .text-blue-700, .print-area .text-blue-700,
+  .printable .text-blue-900, .print-area .text-blue-900,
   .printable .text-blue-950, .print-area .text-blue-950 {
-    color: #172554 !important;
+    color: #000000 !important;
   }
 
-  /* Preserve borders */
-  .printable .border-slate-900, .print-area .border-slate-900 {
-    border-color: #0f172a !important;
-  }
-
-  .printable .border-slate-400, .print-area .border-slate-400 {
-    border-color: #94a3b8 !important;
-  }
-
+  /* Force clean solid black borders */
+  .printable .border-slate-900, .print-area .border-slate-900,
+  .printable .border-slate-400, .print-area .border-slate-400,
   .printable .border-slate-300, .print-area .border-slate-300 {
-    border-color: #cbd5e1 !important;
+    border-color: #000000 !important;
   }
 
   /* Page setup */

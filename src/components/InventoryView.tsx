@@ -823,12 +823,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <th className="p-3.5 w-40 font-mono">الكود / Serial</th>
                     <th className="p-3.5">اسم الصنف</th>
                     <th className="p-3.5 w-32 text-center bg-blue-50/70">عدد الصنف (الكمية)</th>
+                    <th className="p-3.5 w-28 text-center">إجراءات (تعديل / حذف)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredProducts.length === 0 ? (
                     <tr>
-                      <td colSpan={3} className="p-12 text-center text-slate-400">
+                      <td colSpan={4} className="p-12 text-center text-slate-400">
                         <Boxes className="w-12 h-12 mx-auto mb-3 opacity-30 text-blue-600" />
                         <p className="font-bold text-sm text-slate-700">لا توجد أصناف مخزنية تطابق البحث</p>
                       </td>
@@ -872,6 +873,34 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             <span className={isOutOfStock ? 'text-rose-600' : 'text-slate-900'}>
                               {toArabicNumerals(product.stock)} <span className="text-[11px] font-sans text-slate-500">{product.unit || 'وحدة'}</span>
                             </span>
+                          </td>
+
+                          {/* Actions: Edit & Delete */}
+                          <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditModal(product);
+                                }}
+                                className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition cursor-pointer border border-blue-200"
+                                title="تعديل الصنف"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteProductConfirm(product.id, product.name);
+                                }}
+                                className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer border border-rose-200"
+                                title="حذف الصنف"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
