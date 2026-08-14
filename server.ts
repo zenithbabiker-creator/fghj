@@ -428,6 +428,10 @@ app.get('/api/products', (req, res) => {
 app.post('/api/products', (req, res) => {
   const { code, name, category, stock, minStock, unit, description, username, role } = req.body;
 
+  if (role !== 'GENERAL_MANAGER') {
+    return res.status(403).json({ success: false, message: 'عفواً، إضافة صنف جديد هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
+  }
+
   const db = readDB();
   
   let productCode = (code || '').trim();
@@ -495,6 +499,10 @@ app.post('/api/products', (req, res) => {
 // PRODUCTS - Batch Create Products
 app.post('/api/products/batch', (req, res) => {
   const { items, username, role } = req.body;
+
+  if (role !== 'GENERAL_MANAGER') {
+    return res.status(403).json({ success: false, message: 'عفواً، إضافة الأصناف دفعة واحدة هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
+  }
 
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ success: false, message: 'لا توجد أصناف للإضافة' });
@@ -573,6 +581,10 @@ app.put('/api/products/:id', (req, res) => {
   const { id } = req.params;
   const { code, name, category, stock, minStock, unit, description, username, role } = req.body;
 
+  if (role !== 'GENERAL_MANAGER') {
+    return res.status(403).json({ success: false, message: 'عفواً، تعديل الأصناف هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
+  }
+
   const db = readDB();
   const index = db.products.findIndex(p => p.id === id);
   if (index === -1) {
@@ -631,6 +643,10 @@ app.put('/api/products/:id', (req, res) => {
 app.delete('/api/products/:id', (req, res) => {
   const { id } = req.params;
   const { username, role } = req.query;
+
+  if (role !== 'GENERAL_MANAGER') {
+    return res.status(403).json({ success: false, message: 'عفواً، حذف الأصناف هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
+  }
 
   const db = readDB();
   const product = db.products.find(p => p.id === id);

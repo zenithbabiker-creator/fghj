@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { StockMovement, Product } from '../types';
 import { toArabicNumerals } from '../lib/arabicUtils';
-import { X, FileText } from 'lucide-react';
+import { X, FileText, Printer } from 'lucide-react';
 
 export interface DispatchItem {
   product: Product;
@@ -18,29 +18,45 @@ interface DeliveryOrderModalProps {
 }
 
 export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({ movement, items = [], orderNumber, recipientName, recipientEntity, onClose }) => {
-  if (!movement && (!items || items.length === 0)) return null;
+  const isOpen = Boolean(movement || (items && items.length > 0));
+
+  // Recipient info resolution
+  const rawRecipient = recipientName || recipientEntity || (movement?.reason?.startsWith('أمر تسليم مخزن - المستلم:') ? movement.reason.replace('أمر تسليم مخزن - المستلم:', '').trim() : '') || movement?.operatorName || '';
+  const recipientInfo = rawRecipient && rawRecipient !== '..........................' ? rawRecipient.trim() : '';
+  const hasValidRecipient = Boolean(recipientInfo && recipientInfo.length > 0);
 
   const handlePrint = () => {
+    if (!hasValidRecipient) {
+      alert('تنبيه هام: لن يتم تفعيل الطباعة إلا بعد التأكد من تعبئة اسم المستلم / الجهة المستفيدة.');
+      return;
+    }
     try {
       window.focus();
       window.print();
     } catch (e) {
       console.error('Print trigger error:', e);
-      window.print();
     }
   };
 
   // Keyboard shortcut Ctrl + P handler
   useEffect(() => {
+    if (!isOpen) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
         e.preventDefault();
+        if (!hasValidRecipient) {
+          alert('تنبيه هام: لن يتم تفعيل الطباعة واختصار (Ctrl + P) إلا بعد التأكد من تعبئة اسم المستلم / الجهة المستفيدة.');
+          return;
+        }
         handlePrint();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [isOpen, hasValidRecipient]);
+
+  if (!isOpen) return null;
 
   const formattedDate = toArabicNumerals(
     new Date(movement ? movement.timestamp : Date.now()).toLocaleString('ar-EG', {
@@ -71,9 +87,6 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({ movement
     ? movement.referenceNo
     : '0001';
 
-  // Recipient info resolution
-  const recipientInfo = recipientName || recipientEntity || (movement?.reason?.startsWith('أمر تسليم مخزن - المستلم:') ? movement.reason.replace('أمر تسليم مخزن - المستلم:', '').trim() : '') || movement?.operatorName || '..........................';
-
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl border-2 border-black max-h-[95vh] overflow-y-auto space-y-6 text-black">
@@ -83,9 +96,19 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({ movement
           <div className="flex items-center gap-2 flex-wrap">
             <FileText className="w-5 h-5 text-black" />
             <h3 className="text-base font-black text-black">معاينة وطباعة أمر تسليم مخزن</h3>
-            <span className="text-xs bg-black text-white px-2.5 py-1 rounded-md font-mono font-bold mr-2">الطباعة عبر الاختصار (Ctrl + P)</span>
+            <span className="text-xs bg-black text-white px-2.5 py-1 rounded-md font-mono font-bold mr-2">طباعة أصلية داخلية (Qt Native Print)</span>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={!hasValidRecipient}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title="طباعة عبر محرك النظام المباشر"
+            >
+              <Printer className="w-4 h-4" />
+              <span>طباعة المستند (Ctrl + P)</span>
+            </button>
             <button
               type="button"
               onClick={onClose}
@@ -96,6 +119,13 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({ movement
             </button>
           </div>
         </div>
+
+        {/* Recipient Validation Warning if missing */}
+        {!hasValidRecipient && (
+          <div className="p-3 bg-amber-50 border-2 border-amber-300 rounded-xl text-amber-900 text-xs font-extrabold flex items-center gap-2 no-print">
+            <span>⚠️ تنبيه: حقل "اسم المستلم / الجهة المستفيدة" فارغ. لن يتم تفعيل الطباعة إلا بعد كتابته.</span>
+          </div>
+        )}
 
         {/* PRINTABLE AREA - STRICTLY PURE BLACK TEXT ON PURE WHITE BACKGROUND */}
         <div className="printable print-area p-8 bg-white border-2 border-black rounded-xl text-black space-y-6" dir="rtl" style={{ backgroundColor: '#ffffff', color: '#000000' }}>
@@ -124,7 +154,7 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({ movement
             <div className="flex items-center gap-2">
               <span className="text-black font-black">اسم المستلم / الجهة المستفيدة:</span>
               <strong className="text-black font-black text-sm border-b-2 border-black px-3 py-0.5 min-w-[200px] inline-block">
-                {recipientInfo}
+                {recipientInfo || '..........................'}
               </strong>
             </div>
             <div className="flex items-center gap-4 text-xs font-black">
@@ -172,7 +202,7 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({ movement
             <div className="space-y-2 flex flex-col justify-between">
               <span className="font-black text-black block text-sm">توقيع المستلم / الجهة المستفيدة</span>
               <div className="text-[11px] font-black text-black space-y-1">
-                <div>الاسم / الجهة: <span className="font-black text-black underline underline-offset-4">{recipientInfo}</span></div>
+                <div>الاسم / الجهة: <span className="font-black text-black underline underline-offset-4">{recipientInfo || '..........................'}</span></div>
               </div>
               <div className="border-b-2 border-dashed border-black w-4/5 mx-auto pb-1 text-black text-[11px] pt-2">
                 ..........................................
@@ -204,7 +234,15 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({ movement
 
         {/* Bottom Controls Bar (no-print) */}
         <div className="flex items-center justify-between pt-3 border-t-2 border-black no-print">
-          <span className="text-xs text-black font-bold font-mono">اضغط على (Ctrl + P) لإرسال المستند إلى الطابعة مباشرة</span>
+          <button
+            type="button"
+            onClick={handlePrint}
+            disabled={!hasValidRecipient}
+            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-md transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Printer className="w-4 h-4" />
+            <span>طباعة المستند عبر محرك النظام (Ctrl + P)</span>
+          </button>
           <button
             type="button"
             onClick={onClose}
@@ -218,4 +256,3 @@ export const DeliveryOrderModal: React.FC<DeliveryOrderModalProps> = ({ movement
     </div>
   );
 };
-

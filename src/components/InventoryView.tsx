@@ -52,6 +52,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onStockMovement,
   onBack,
 }) => {
+  const isGeneralManager = currentUser?.role === 'GENERAL_MANAGER';
   const [searchTerm, setSearchTerm] = useState('');
 
   // Product Add / Edit Modal & Dedicated Standalone Batch Screen
@@ -316,6 +317,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   // Open Add Product Modal
   const openAddModal = () => {
+    if (!isGeneralManager) {
+      alert('عفواً، خيارات إضافة الأصناف هي صلاحيات حصرية للمدير العام (الحساب الرئيسي) فقط.');
+      return;
+    }
     setEditingProduct(null);
     setCode(generateNextCode(products));
     setName('');
@@ -502,6 +507,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   // Open Edit Product Modal
   const openEditModal = (product: Product) => {
+    if (!isGeneralManager) {
+      alert('عفواً، خيارات تعديل بيانات الأصناف هي صلاحيات حصرية للمدير العام (الحساب الرئيسي) فقط.');
+      return;
+    }
     setEditingProduct(product);
     setCode(product.code);
     setName(product.name);
@@ -514,6 +523,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   // Save Edit Product
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isGeneralManager) {
+      setFormError('عفواً، خيارات تعديل الأصناف هي صلاحيات حصرية للمدير العام فقط.');
+      return;
+    }
     setFormError('');
 
     if (!name.trim()) {
@@ -544,6 +557,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   };
 
   const handleDeleteProductConfirm = async (id: string, nameStr: string) => {
+    if (!isGeneralManager) {
+      alert('عفواً، خيارات حذف الأصناف هي صلاحيات حصرية للمدير العام (الحساب الرئيسي) فقط.');
+      return;
+    }
     if (window.confirm(`هل أنت تأكد من إزالة الصنف "${nameStr}" نهائياً من المخزن؟`)) {
       await onDeleteProduct(id);
     }
@@ -795,13 +812,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               />
             </div>
 
-            <button
-              onClick={openAddModal}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-blue-200 flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              <span>إضافة صنف جديد</span>
-            </button>
+            {isGeneralManager && (
+              <button
+                onClick={openAddModal}
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-blue-200 flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>إضافة صنف جديد</span>
+              </button>
+            )}
           </div>
 
           {/* Product List Table with Direct Click-to-Add Behavior */}
@@ -823,13 +842,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <th className="p-3.5 w-40 font-mono">الكود / Serial</th>
                     <th className="p-3.5">اسم الصنف</th>
                     <th className="p-3.5 w-32 text-center bg-blue-50/70">عدد الصنف (الكمية)</th>
-                    <th className="p-3.5 w-28 text-center">إجراءات (تعديل / حذف)</th>
+                    {isGeneralManager && (
+                      <th className="p-3.5 w-28 text-center">إجراءات (تعديل / حذف)</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredProducts.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="p-12 text-center text-slate-400">
+                      <td colSpan={isGeneralManager ? 4 : 3} className="p-12 text-center text-slate-400">
                         <Boxes className="w-12 h-12 mx-auto mb-3 opacity-30 text-blue-600" />
                         <p className="font-bold text-sm text-slate-700">لا توجد أصناف مخزنية تطابق البحث</p>
                       </td>
@@ -875,33 +896,35 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             </span>
                           </td>
 
-                          {/* Actions: Edit & Delete */}
-                          <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openEditModal(product);
-                                }}
-                                className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition cursor-pointer border border-blue-200"
-                                title="تعديل الصنف"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteProductConfirm(product.id, product.name);
-                                }}
-                                className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer border border-rose-200"
-                                title="حذف الصنف"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
+                          {/* Actions: Edit & Delete (General Manager only) */}
+                          {isGeneralManager && (
+                            <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditModal(product);
+                                  }}
+                                  className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition cursor-pointer border border-blue-200"
+                                  title="تعديل الصنف"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteProductConfirm(product.id, product.name);
+                                  }}
+                                  className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition cursor-pointer border border-rose-200"
+                                  title="حذف الصنف"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       );
                     })
