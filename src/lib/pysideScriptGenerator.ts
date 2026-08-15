@@ -37,10 +37,14 @@ def get_db_path():
     return os.path.join(get_app_dir(), 'nasser_store.db')
 
 def init_sqlite_db():
-    """تهيئة قاعدة البيانات وإنشاء الجداول تلقائياً إن لم تكن موجودة"""
+    """تهيئة قاعدة البيانات وإنشاء الجداول وتفعيل وضع الحفظ الدائم WAL على القرص الصلب"""
     db_path = get_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    
+    # تفعيل وضع WAL لضمان الحفظ الفوري المقاوم لانقطاع التيار وإغلاق الجهاز لسنوات
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA synchronous=FULL;")
     
     # جدول المنتجات
     cursor.execute('''
@@ -103,16 +107,17 @@ def init_sqlite_db():
         )
     ''')
     
-    # تعبئة المنتجات الافتراضية إذا كانت القاعدة فارغة
+    # تعبئة المنتجات الافتراضية فقط إذا كانت القاعدة جديدة وفارغة تماماً (0 أصناف)
     cursor.execute("SELECT COUNT(*) FROM products")
     if cursor.fetchone()[0] == 0:
         now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
         default_products = [
-            ('1', 'PRD-101', 'ماكينة إعداد القهوة المتقدمة NASSER-Pro', 'عام', 50, 5, 'وحدة', '', now_iso),
-            ('2', 'PRD-102', 'طاحونة حبوب القهوة الصناعية 1500W', 'عام', 25, 5, 'وحدة', '', now_iso),
-            ('3', 'PRD-103', 'فلتر مياه نقي خماسي المراحل', 'عام', 100, 5, 'وحدة', '', now_iso),
-            ('4', 'PRD-104', 'ميزان حرارة ورطوبة ديجيتال دقيق', 'عام', 4, 5, 'وحدة', '', now_iso),
-            ('5', 'PRD-105', 'طابعة فواتير حرارية عالية السرعة 80mm', 'عام', 15, 5, 'وحدة', '', now_iso),
+            ('1', 'NASSER-101', 'ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3', 'أجهزة ومعدات', 45, 5, 'وحدة', '', now_iso),
+            ('2', 'NASSER-102', 'طاحونة حبوب القهوة الصناعية 1500W دقيقة التنعيم', 'أجهزة ومعدات', 22, 5, 'وحدة', '', now_iso),
+            ('3', 'NASSER-103', 'طابعة فواتير حرارية عالية السرعة 80mm USB/LAN', 'إلكترونيات ومعدات', 18, 5, 'وحدة', '', now_iso),
+            ('4', 'NASSER-104', 'ميزان إلكتروني ديجيتال دقيق للوزن والجرعات 0.1g', 'أجهزة قياس', 4, 5, 'وحدة', '', now_iso),
+            ('5', 'NASSER-105', 'فلتر تنقية وتقطير المياه خماسي المراحل للمقاهي', 'مستلزمات ومستهلكات', 60, 5, 'وحدة', '', now_iso),
+            ('6', 'NASSER-106', 'مقبض ضغط القهوة اليدوي (Tamper) استانلس ستيل 58mm', 'ملحقات ومستلزمات', 85, 5, 'وحدة', '', now_iso),
         ]
         cursor.executemany(
             "INSERT INTO products (id, code, name, category, stock, min_stock, unit, description, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -130,7 +135,7 @@ def init_sqlite_db():
         )
         cursor.execute(
             "INSERT INTO users (id, username, password, name, role, gmail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ('usr_2', 'cashier1', 'sales123', 'مدير المبيعات - أحمد مصطفى', 'SALES_MANAGER', 'cashier.nasser@gmail.com', now_iso)
+            ('usr_2', 'wh_manager', 'wh123', 'أمين المخزن الرئيسي - أحمد مصطفى', 'WAREHOUSE_MANAGER', 'warehouse.nasser@gmail.com', now_iso)
         )
         conn.commit()
 
@@ -382,7 +387,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         # 3. Movement Endpoint (For Warehouse Delivery Orders & Adjustments)
         if parsed_path == '/api/movements':
             data = self._read_json_body()
-            p_id = data.get('productId')
+            p_id = str(data.get('productId', ''))
             m_type = data.get('type', 'OUT')
             ref_no = data.get('referenceNo', '')
             reason_str = data.get('reason', '')
@@ -397,22 +402,60 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             conn = sqlite3.connect(get_db_path())
             cursor = conn.cursor()
 
-            # Insert into movements table
+            # Find product by id or code
+            cursor.execute("SELECT id, code, name, stock FROM products WHERE id=? OR code=?", (p_id, p_id))
+            p_row = cursor.fetchone()
+            
+            actual_id = p_id
+            p_code = ""
+            p_name = "صنف مخزني"
+            previous_stock = 0
+            new_stock = 0
+
+            if p_row:
+                actual_id = p_row[0]
+                p_code = p_row[1]
+                p_name = p_row[2]
+                previous_stock = int(p_row[3])
+                
+                if m_type == 'IN':
+                    new_stock = previous_stock + qty
+                elif m_type == 'OUT':
+                    new_stock = max(0, previous_stock - qty)
+                elif m_type == 'ADJUSTMENT':
+                    new_stock = max(0, qty)
+                else:
+                    new_stock = previous_stock
+                
+                # تحديث فوري مؤكد مع COMMIT فيزيائي على القرص
+                cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
+            else:
+                new_stock = max(0, qty)
+
+            # تسجيل الحركة في جدول الحركات
             cursor.execute('''
                 INSERT INTO movements (id, reference_no, product_id, type, quantity, reason, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (mov_id, ref_no, p_id, m_type, qty, reason_str, now_iso))
+            ''', (mov_id, ref_no, actual_id, m_type, qty, reason_str, now_iso))
 
-            cursor.execute("SELECT stock FROM products WHERE id=?", (p_id,))
-            p_row = cursor.fetchone()
-            if p_row:
-                curr_stock = p_row[0]
-                new_stock = curr_stock + qty if m_type == 'IN' else max(0, curr_stock - qty)
-                cursor.execute("UPDATE products SET stock=? WHERE id=?", (new_stock, p_id))
-            
             conn.commit()
             conn.close()
-            return self._send_json({"success": True, "message": "تم تسجيل حركة المخزون بنجاح بجدول الحركة وقاعدة البيانات المحلية"})
+
+            movement_obj = {
+                "id": mov_id,
+                "productId": actual_id,
+                "productCode": p_code,
+                "productName": p_name,
+                "type": m_type,
+                "quantity": qty,
+                "previousStock": previous_stock,
+                "newStock": new_stock,
+                "reason": reason_str,
+                "referenceNo": ref_no,
+                "operatorName": data.get('operatorName', 'أمين المخزن'),
+                "timestamp": now_iso
+            }
+            return self._send_json({"success": True, "movement": movement_obj, "message": "تم حفظ تحديث الكمية في قاعدة البيانات الدائمة SQLite بنجاح"})
 
         # 4. Add Product (With Immediate Commit)
         if parsed_path == '/api/products':
