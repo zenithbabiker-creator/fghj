@@ -76,28 +76,30 @@ export const DesktopAppTab: React.FC = () => {
           </div>
 
           <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-            <span className="font-extrabold text-blue-700 block mb-1">2. تشغيل السكريبت للاختبار:</span>
+            <span className="font-extrabold text-blue-700 block mb-1">2. تجربة وتشغيل السكريبت:</span>
             <code className="bg-slate-900 text-emerald-400 p-2 rounded block font-mono text-[11px] select-all">
               python nasser_company_app.py
             </code>
           </div>
 
           <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
-            <span className="font-extrabold text-blue-700 block mb-1">3. البناء إلى ملف .exe مستقل:</span>
-            <code className="bg-slate-900 text-emerald-400 p-2 rounded block font-mono text-[11px] select-all">
-              pyinstaller --noconsole --onefile nasser_company_app.py
+            <span className="font-extrabold text-blue-700 block mb-1">3. أمر التغليف المعتمد (مع تضمين ملفات dist):</span>
+            <code className="bg-slate-900 text-emerald-400 p-2 rounded block font-mono text-[10px] select-all leading-tight">
+              pyinstaller --noconsole --onefile --add-data "dist;dist" nasser_company_app.py
             </code>
           </div>
         </div>
 
-        <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl text-xs space-y-1 text-slate-700">
-          <span className="font-bold text-blue-900 block">⚙️ قواعد المعالجة والتجميع الصامت في تطبيق سطح المكتب (.exe):</span>
+        <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl text-xs space-y-1.5 text-slate-700">
+          <span className="font-bold text-blue-900 block">⚙️ حلول التغليف المطبقة برمجياً (Production Packaging Engine):</span>
           <p className="text-[11px] leading-relaxed text-slate-600">
-            • <strong>إزالة شاشات التهيئة (UI Removal):</strong> تم إلغاء كافة نوافذ الإعداد والتهيئة البصرية من واجهة المستخدم نهائياً.
+            • <strong>معالجة الارتجاف والرسومات (Flickering & GPU Fix):</strong> تم تعطيل تسريع GPU لـ OpenGL عبر <code>Qt.AA_UseSoftwareOpenGL</code> وإيقاف تسريع Chromium المزدوج لضمان ثبات النوافذ المنبثقة وحوارات الطباعة 100% دون أي اهتزاز.
             <br />
-            • <strong>التنفيذ التلقائي في الخلفية (Internal Logic Execution):</strong> تتم تهيئة قاعدة البيانات SQLite وإنشاء الجداول وتجهيز بيئة التشغيل تلقائياً بدون الحاجة لتدخل المستخدم.
+            • <strong>معالجة الشاشة البيضاء (Asset Path Resolution):</strong> تم اعتماد دالة <code>get_resource_path</code> المزودة بـ <code>sys._MEIPASS</code> لاستخراج ملفات الواجهة والـ Assets بدقة عند تشغيل الـ EXE في أي جهاز غريب.
             <br />
-            • <strong>التوافق مع PyInstaller:</strong> يتم بناء الملف كنسخة مستقلة 100% بحزمة واحدة <code>--onefile</code> وأوامر تشغيل صامتة <code>--noconsole</code>.
+            • <strong>قاعدة البيانات الديناميكية (Dynamic SQLite):</strong> تهيئة وتخزين دائم بـ <code>AppData</code> ومقاومة انقطاع التيار بـ WAL Mode مع تعبئة تلقائية لكافة أصناف ومستخدمي الشركة عند التثبيت لأول مرة.
+            <br />
+            • <strong>الطباعة الأصلية (Native Qt Printing):</strong> ربط كلاس <code>QPrinter</code> و <code>QPrintDialog</code> الداخلي مع التقاط اختصار <code>Ctrl + P</code> الفوري لعرض حوار طباعة ويندوز دون الحاجة لبرامج خارجية.
           </p>
         </div>
       </div>

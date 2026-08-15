@@ -85,19 +85,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
-        if (cartItems.length > 0) {
-          e.preventDefault();
-          if (!recipientName.trim()) {
-            alert('تنبيه هام: يرجى كتابة اسم المستلم / الجهة المستفيدة أولاً قبل طباعة أمر تسليم المخزن.');
-            return;
-          }
-          handleCompleteDeliveryOrder();
+        // If the delivery order modal is already open, let the modal handle it
+        if (activeDeliveryItems && activeDeliveryItems.length > 0) {
+          return;
         }
+
+        e.preventDefault();
+        if (cartItems.length === 0) {
+          alert('💡 تنبيه: سلة أمر التسليم فارغة حالياً.\n\nخطوات الطباعة:\n1. انقر على الصنف المراد تسليمه لإضافته إلى السلة.\n2. اكتب "اسم المستلم / الجهة المستفيدة".\n3. اضغط على زر "إتمام وطباعة أمر تسليم مخزن" أو اختصار (Ctrl + P).');
+          return;
+        }
+        if (!recipientName.trim()) {
+          alert('⚠️ تنبيه هام: يرجى كتابة "اسم المستلم / الجهة المستفيدة" في الحقل المخصص بالسلة قبل طباعة أمر تسليم المخزن.');
+          return;
+        }
+        handleCompleteDeliveryOrder();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [cartItems, recipientName]);
+  }, [cartItems, recipientName, activeDeliveryItems]);
 
   // Key Inventory Metrics
   const metrics = useMemo(() => {

@@ -1,17 +1,19 @@
 /**
  * Standalone Native Python PySide6 Launcher Generator for شركة NASSER Desktop (.exe)
- * Uses pure PySide6 QWebEngineView + PySide6.QtPrintSupport (QPrinter, QPrintDialog, QPrintPreviewDialog)
- * with SQLite LocalAppData engine for 100% offline native Windows execution and native direct printing.
- * Strictly eliminates all external program/browser invocations.
+ * Uses pure PySide6 QWebEngineView + PySide6.QtPrintSupport (QPrinter, QPrintDialog)
+ * with SQLite LocalAppData/Portable engine for 100% offline native Windows execution and native direct printing.
+ * Zero external browser/app dependencies.
  */
 
 export function generatePySideScript(): string {
   return `"""
 ====================================================================
 شركة NASSER - نظام إدارة المخازن والمخزون
-تطبيق سطح المكتب الاحترافي لشركة ناصر (PySide6 Native Engine)
-طباعة داخلية أصلية 100% عبر PySide6.QtPrintSupport بدون برامج خارجية
-حفظ دائم وفوري في قاعدة بيانات SQLite محلياً في AppData.
+تطبيق سطح المكتب الاحترافي لشركة ناصر (PySide6 Native Desktop App)
+- حل مشكلة المسارات والشاشة البيضاء عبر sys._MEIPASS و get_resource_path
+- قاعدة بيانات SQLite ديناميكية دائمة تحفظ البيانات أوفلاين مدى الحياة
+- طباعة داخلية أصلية 100% عبر PySide6.QtPrintSupport (QPrinter, QPrintDialog)
+- التقاط فوري لاختصار لوحة المفاتيح (Ctrl + P) لطباعة المستند مباشرة
 ====================================================================
 """
 
@@ -25,15 +27,63 @@ import socket
 import http.server
 import socketserver
 
-# --- PERMANENT STORAGE DIRECTORY & DATABASE CONFIGURATION ---
+# --- 1. RESOURCE PATH RESOLVER FOR PYINSTALLER (Fix White Screen) ---
+def get_resource_path(relative_path):
+    """
+    تحديد المسار الدقيق لملفات الواجهة (HTML/JS/CSS/Assets) المدمجة
+    سواء كان التطبيق يعمل في بيئة التطوير أو مجمّعاً داخل ملف .exe مستقل بواسطة PyInstaller.
+    """
+    if hasattr(sys, '_MEIPASS'):
+        # المسار المؤقت الداخلي الذي يستخرجه PyInstaller
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+def get_dist_path():
+    """تحديد مجلد dist المجمّع بدقة تامة"""
+    # 1. البحث داخل _MEIPASS (عند التشغيل من ملف EXE مجمّع بـ --add-data "dist;dist")
+    meipass_dist = get_resource_path("dist")
+    if os.path.exists(os.path.join(meipass_dist, "index.html")):
+        return meipass_dist
+        
+    # 2. البحث المباشر في جذر _MEIPASS (إذا تم تضمين محتويات dist مباشرة)
+    if hasattr(sys, '_MEIPASS') and os.path.exists(os.path.join(sys._MEIPASS, "index.html")):
+        return sys._MEIPASS
+
+    # 3. البحث بجانب ملف السكريبت أو ملف الـ EXE
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+    candidates = [
+        os.path.join(exe_dir, "dist"),
+        exe_dir,
+        os.path.abspath("dist"),
+        os.path.abspath(".")
+    ]
+    for c in candidates:
+        if os.path.exists(os.path.join(c, "index.html")):
+            return c
+            
+    return meipass_dist
+
+def get_html_file_path():
+    """الحصول على المسار المؤكد لملف index.html"""
+    dist_dir = get_dist_path()
+    return os.path.join(dist_dir, "index.html")
+
+# --- 2. DYNAMIC PERMANENT DATABASE CONFIGURATION ---
 def get_app_dir():
-    """الحصول على المسار الدائم للتطبيق في AppData"""
+    """الحصول على المجلد الدائم لقاعدة البيانات في LocalAppData لضمان حفظ التعديلات مدى الحياة"""
     app_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'NasserCompanyApp')
     os.makedirs(app_dir, exist_ok=True)
     return app_dir
 
 def get_db_path():
-    """المسار الثابت لقاعدة بيانات SQLite"""
+    """المسار الثابت لقاعدة بيانات SQLite على القرص الصلب"""
+    # 1. التحقق أولاً إذا كان المستخدم وضع ملف database.db مخصص بجانب الـ EXE
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+    local_side_db = os.path.join(exe_dir, 'nasser_store.db')
+    if os.path.exists(local_side_db):
+        return local_side_db
+
+    # 2. المسار الدائم الرئيسي في AppData
     return os.path.join(get_app_dir(), 'nasser_store.db')
 
 def init_sqlite_db():
@@ -141,54 +191,15 @@ def init_sqlite_db():
 
     conn.close()
 
-# --- NETWORK & PATH UTILITIES ---
+# --- 3. EMBEDDED HTTP SERVER WITH SQLITE API BRIDGE ---
 def find_free_port():
     """البحث عن منفذ شبكة محلي متاح تلقائياً"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('127.0.0.1', 0))
         return s.getsockname()[1]
 
-def get_base_dir():
-    """الحصول على المسار الرئيسي عند التشغيل من ملف تنفيذي .exe أو مثبّت"""
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
-
-def get_dist_path():
-    """تحديد المسار الفعلي لمجلد الويب المجمّع dist عند تشغيل الملف التنفيذي .exe والمثبّت"""
-    base_dir = get_base_dir()
-    meipass = getattr(sys, '_MEIPASS', None)
-    
-    candidates = []
-    if meipass:
-        candidates.append(os.path.join(meipass, 'dist'))
-        candidates.append(meipass)
-    
-    candidates.extend([
-        os.path.join(base_dir, 'dist'),
-        base_dir,
-        os.path.abspath('dist'),
-        os.path.abspath('.')
-    ])
-    
-    for cand in candidates:
-        if cand and os.path.exists(os.path.join(cand, 'index.html')):
-            return cand
-            
-    return os.path.join(base_dir, 'dist')
-
-def get_html_file_path():
-    """تحديد المسار المباشر لملف index.html"""
-    dist_dir = get_dist_path()
-    html_path = os.path.join(dist_dir, 'index.html')
-    if not os.path.exists(html_path):
-        base_dir = get_base_dir()
-        html_path = os.path.join(base_dir, 'index.html')
-    return html_path
-
-# --- HTTP HANDLER WITH SQLITE API BRIDGE ---
 class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    """خادم محلي ذكي يربط واجهة الويب بقاعدة بيانات SQLite المحفوظة في AppData"""
+    """خادم محلي يخدم ملفات الويب ويربط الواجهة بقاعدة بيانات SQLite المحلية"""
     
     def __init__(self, *args, **kwargs):
         directory = get_dist_path()
@@ -320,7 +331,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 return self._send_json({"success": False, "message": "اسم المستخدم أو كلمة المرور غير صحيحة"}, 401)
 
-        # 2. Add Sale Invoice (With Automatic Stock Deduction)
+        # 2. Add Sale Invoice
         if parsed_path == '/api/sales':
             data = self._read_json_body()
             items = data.get('items', [])
@@ -328,7 +339,6 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             conn = sqlite3.connect(get_db_path())
             cursor = conn.cursor()
             
-            # توليد رقم تسلسلي للفاتورة
             cursor.execute("SELECT COUNT(*) FROM sales")
             count = cursor.fetchone()[0] + 1
             invoice_num = f"INV-{time.strftime('%Y%m')}-{count:04d}"
@@ -354,7 +364,6 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 data.get('notes', '')
             ))
             
-            # خصم الكميات من المخزن فوراً مع ضمان تحويل أعداد الكميات بدقة
             for item in items:
                 p_code = item.get('productCode')
                 p_id = item.get('productId')
@@ -367,7 +376,6 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 elif p_id:
                     cursor.execute("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?", (qty, p_id))
             
-            # COMMIT فوري على القرص الصلب لتجنب فقدان البيانات
             conn.commit()
             conn.close()
             
@@ -384,7 +392,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             }
             return self._send_json({"success": True, "sale": new_sale, "message": "تم حفظ الفاتورة بنجاح في قاعدة البيانات المحلية"})
 
-        # 3. Movement Endpoint (For Warehouse Delivery Orders & Adjustments)
+        # 3. Movement Endpoint (Delivery Orders & Stock Adjustments)
         if parsed_path == '/api/movements':
             data = self._read_json_body()
             p_id = str(data.get('productId', ''))
@@ -402,7 +410,6 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             conn = sqlite3.connect(get_db_path())
             cursor = conn.cursor()
 
-            # Find product by id or code
             cursor.execute("SELECT id, code, name, stock FROM products WHERE id=? OR code=?", (p_id, p_id))
             p_row = cursor.fetchone()
             
@@ -427,12 +434,10 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 else:
                     new_stock = previous_stock
                 
-                # تحديث فوري مؤكد مع COMMIT فيزيائي على القرص
                 cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
             else:
                 new_stock = max(0, qty)
 
-            # تسجيل الحركة في جدول الحركات
             cursor.execute('''
                 INSERT INTO movements (id, reference_no, product_id, type, quantity, reason, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -457,7 +462,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             }
             return self._send_json({"success": True, "movement": movement_obj, "message": "تم حفظ تحديث الكمية في قاعدة البيانات الدائمة SQLite بنجاح"})
 
-        # 4. Add Product (With Immediate Commit)
+        # 4. Add Product
         if parsed_path == '/api/products':
             data = self._read_json_body()
             conn = sqlite3.connect(get_db_path())
@@ -523,6 +528,103 @@ def start_local_server(port):
     with socketserver.TCPServer(("127.0.0.1", port), handler) as httpd:
         httpd.serve_forever()
 
+# --- 4. NATIVE PYSIDE6 MAIN APPLICATION WINDOW CLASS & GPU FLICKER FIX ---
+# إيقاف التسريع البرمجي لـ GPU لمنع ارتجاف وتداخل النوافذ المنبثقة (Modal & Dialog Flickering Fix)
+os.environ["QT_WEBENGINE_DISABLE_GPU"] = "1"
+os.environ["QT_QUICK_BACKEND"] = "software"
+os.environ["QSG_RENDER_LOOP"] = "basic"
+
+try:
+    from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QFileDialog, QDialog
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWebEngineCore import QWebEngineSettings
+    from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrinterInfo
+    from PySide6.QtGui import QKeySequence, QShortcut, QIcon
+    from PySide6.QtCore import QUrl, Qt
+
+    class NasserMainWindow(QMainWindow):
+        def __init__(self, app_url):
+            super().__init__()
+            self.app_url = app_url
+            self.setWindowTitle("شركة NASSER - نظام إدارة المخازن والمخزون")
+            self.resize(1366, 850)
+            
+            # ضبط خصائص ثبات النافذة
+            self.setAttribute(Qt.WA_NativeWindow, True)
+            
+            # تهيئة محرك عرض الويب الداخلي
+            self.web_view = QWebEngineView(self)
+            self.web_view.setAttribute(Qt.WA_NativeWindow, True)
+            
+            # تفعيل إعدادات الطباعة الأصلية وخلفيات الألوان بدقة
+            settings = self.web_view.settings()
+            settings.setAttribute(QWebEngineSettings.WebAttribute.PrintElementBackgrounds, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.ShowScrollBars, True)
+            
+            # ربط إشارة الطباعة الداخلية الخاصة بـ QWebEnginePage
+            self.web_view.page().printRequested.connect(self.print_function)
+            
+            # ربط اختصار لوحة المفاتيح الصريح Ctrl + P داخل نافذة التطبيق
+            self.shortcut_print = QShortcut(QKeySequence("Ctrl+P"), self)
+            self.shortcut_print.activated.connect(self.print_function)
+            
+            # تحميل الواجهة عبر الرابط المحلي للخادم الداخلي
+            self.web_view.setUrl(QUrl(self.app_url))
+            self.setCentralWidget(self.web_view)
+
+        def print_function(self):
+            """
+            دالة الطباعة الأصلية 100% (Native Qt Printing)
+            تأخذ محتوى الـ QWebEngineView وتمرره مباشرة إلى QPrinter لإظهار حوار طباعة ويندوز
+            """
+            try:
+                printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+                printer.setFullPage(True)
+                
+                # فتح حوار طباعة ويندوز الأصلي مباشرة مع تثبيت الأب والنمطية لمنع أي ارتجاف
+                print_dialog = QPrintDialog(printer, self)
+                print_dialog.setWindowTitle("طباعة أمر تسليم مخزن - شركة ناصر")
+                print_dialog.setAttribute(Qt.WA_NativeWindow, True)
+                print_dialog.setWindowModality(Qt.ApplicationModal)
+                
+                if print_dialog.exec() == QPrintDialog.DialogCode.Accepted:
+                    self.web_view.page().print(printer, lambda success: None)
+            except Exception as pe:
+                print("Native Print Error:", pe)
+                # بديل مباشر لحفظ المستند كملف PDF إذا لم تكن هناك طابعة فيزيائية معرفة
+                try:
+                    save_dialog = QFileDialog(self, "حفظ أمر التسليم كملف PDF", os.path.expanduser("~/Desktop/DeliveryOrder.pdf"), "PDF Files (*.pdf)")
+                    save_dialog.setAttribute(Qt.WA_NativeWindow, True)
+                    save_dialog.setWindowModality(Qt.ApplicationModal)
+                    save_dialog.setAcceptMode(QFileDialog.AcceptSave)
+                    
+                    if save_dialog.exec() == QDialog.Accepted:
+                        selected_files = save_dialog.selectedFiles()
+                        if selected_files:
+                            pdf_path = selected_files[0]
+                            self.web_view.page().printToPdf(pdf_path)
+                            msg = QMessageBox(self)
+                            msg.setAttribute(Qt.WA_NativeWindow, True)
+                            msg.setWindowModality(Qt.ApplicationModal)
+                            msg.setWindowTitle("تم الحفظ بنجاح")
+                            msg.setText(f"تم حفظ أمر التسليم كملف PDF في المسار:\\n{pdf_path}")
+                            msg.setIcon(QMessageBox.Information)
+                            msg.exec()
+                except Exception as save_err:
+                    err_msg = QMessageBox(self)
+                    err_msg.setAttribute(Qt.WA_NativeWindow, True)
+                    err_msg.setWindowModality(Qt.ApplicationModal)
+                    err_msg.setWindowTitle("تنبيه الطباعة")
+                    err_msg.setText(f"تعذر الاتصال بالطابعة:\\n{pe}")
+                    err_msg.setIcon(QMessageBox.Warning)
+                    err_msg.exec()
+
+except ImportError:
+    pass
+
 def main():
     # 1. تهيئة قاعدة بيانات SQLite الدائمة في AppData عند التشغيل
     init_sqlite_db()
@@ -534,64 +636,27 @@ def main():
     server_thread.start()
     
     app_url = f"http://127.0.0.1:{port}"
-    app_title = "شركة NASSER - نظام إدارة المخازن والمخزون"
 
-    # 3. محرك PySide6 الأصلي الحصري مع مكتبة الطباعة المباشرة PySide6.QtPrintSupport
+    # 3. تشغيل نافذة تطبيق PySide6 الأصلية مع ضبط إعدادات التوافق وإلغاء التسريع البرمجي للـ GPU
     try:
-        from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
-        from PySide6.QtWebEngineWidgets import QWebEngineView
-        from PySide6.QtWebEngineCore import QWebEngineSettings
-        from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrintPreviewDialog
-        from PySide6.QtGui import QKeySequence, QShortcut, QIcon
-        from PySide6.QtCore import QUrl, Qt
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+
+        # إيقاف التداخل البرمجي لبطاقة الشاشة للنوافذ الفرعية ومنع الارتجاف
+        QApplication.setAttribute(Qt.AA_UseSoftwareOpenGL, True)
+        
+        # تمرير معاملات إلغاء تسريع GPU لمحرك Chromium / WebEngine
+        sys.argv.extend([
+            "--disable-gpu",
+            "--disable-gpu-compositing",
+            "--in-process-gpu"
+        ])
         
         app = QApplication(sys.argv)
-        app.setApplicationName(app_title)
+        app.setApplicationName("شركة NASSER - إدارة المخازن")
         
-        window = QMainWindow()
-        window.setWindowTitle(app_title)
-        window.resize(1366, 850)
-        
-        web_view = QWebEngineView(window)
-        
-        # تفعيل إعدادات الطباعة الأصلية بدقة تامة والخلفيات
-        web_settings = web_view.settings()
-        web_settings.setAttribute(QWebEngineSettings.WebAttribute.PrintElementBackgrounds, True)
-        web_settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, True)
-        web_settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
-        web_settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-        web_settings.setAttribute(QWebEngineSettings.WebAttribute.ShowScrollBars, True)
-        
-        # دالة الطباعة الأصلية المباشرة (Qt Native Print Dialog)
-        def trigger_native_print_dialog():
-            try:
-                printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-                printer.setFullPage(True)
-                
-                # فتح حوار طباعة ويندوز الأصلي مباشرة من داخل PySide6
-                print_dialog = QPrintDialog(printer, window)
-                print_dialog.setWindowTitle("طباعة أمر تسليم مخزن - شركة ناصر")
-                if print_dialog.exec() == QPrintDialog.DialogCode.Accepted:
-                    web_view.page().print(printer, lambda success: None)
-            except Exception as pe:
-                print("Native Print Error:", pe)
-
-        # ربط إشارة الطباعة الداخلية الخاصة بمحرك QWebEnginePage مباشرة
-        web_view.page().printRequested.connect(trigger_native_print_dialog)
-        
-        # ربط اختصار لوحة المفاتيح Ctrl + P في نافذة التطبيق الأصلية
-        shortcut_print = QShortcut(QKeySequence("Ctrl+P"), window)
-        shortcut_print.activated.connect(trigger_native_print_dialog)
-
-        # تحميل تطبيق React عبر العنوان المحلي
-        html_path = get_html_file_path()
-        if os.path.exists(html_path):
-            web_view.setUrl(QUrl.fromLocalFile(html_path))
-        else:
-            web_view.setUrl(QUrl(app_url))
-            
-        window.setCentralWidget(web_view)
-        window.showMaximized()
+        main_win = NasserMainWindow(app_url)
+        main_win.showMaximized()
         sys.exit(app.exec())
         
     except ImportError as ie:
@@ -605,3 +670,4 @@ if __name__ == "__main__":
     main()
 `;
 }
+
