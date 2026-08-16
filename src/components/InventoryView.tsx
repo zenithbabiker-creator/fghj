@@ -174,13 +174,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setCartItems([]);
   };
 
-  // Sequential Delivery Order Number Generator (9945, 9946, 9947...)
+  // Sequential Delivery Order Number Generator starting from 1 (1, 2, 3, 4...)
   const getNextDeliveryOrderNo = (): string => {
-    let maxSeq = 9944; // Default sequence base starting at 9944
+    let maxSeq = 0; // Starts at 0 so first document is 1
 
     // Check stored sequence counter in localStorage
     try {
-      const savedSeq = localStorage.getItem('nasser_last_delivery_order_seq');
+      const savedSeq = localStorage.getItem('nasser_last_delivery_order_seq_v2');
       if (savedSeq) {
         const parsedSeq = parseInt(savedSeq, 10);
         if (!isNaN(parsedSeq) && parsedSeq > maxSeq) {
@@ -244,15 +244,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     try {
       const dispatchItemsToPrint: DispatchItem[] = [];
-      const finalOrderNo = customOrderNo.trim() || getNextDeliveryOrderNo();
+      const finalOrderNo = getNextDeliveryOrderNo();
 
       // Persist generated order sequence number immediately
-      const numVal = parseInt(finalOrderNo.replace(/\D/g, ''), 10);
+      const numVal = parseInt(finalOrderNo, 10);
       if (!isNaN(numVal)) {
         try {
-          const currentSeq = parseInt(localStorage.getItem('nasser_last_delivery_order_seq') || '9944', 10);
+          const currentSeq = parseInt(localStorage.getItem('nasser_last_delivery_order_seq_v2') || '0', 10);
           if (numVal >= currentSeq) {
-            localStorage.setItem('nasser_last_delivery_order_seq', String(numVal));
+            localStorage.setItem('nasser_last_delivery_order_seq_v2', String(numVal));
           }
         } catch (e) {
           // ignore
@@ -666,7 +666,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <thead>
                   <tr className="bg-[#0F172A] text-white font-extrabold text-xs sm:text-sm border-b border-slate-800">
                     <th className="p-3.5 w-12 text-center">#</th>
-                    <th className="p-3.5 w-44 sm:w-52">الكود / Serial Number (تلقائي)</th>
+                    <th className="p-3.5 w-44 sm:w-52">الكود / Serial Number (تلقائي ومحمي)</th>
                     <th className="p-3.5">اسم الصنف بالكامل</th>
                     <th className="p-3.5 w-32 sm:w-40 text-center">العدد / الكمية</th>
                     <th className="p-3.5 w-16 text-center">حذف</th>
@@ -686,10 +686,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         <td className="p-3">
                           <input
                             type="text"
+                            readOnly
+                            disabled
                             value={row.code}
-                            onChange={(e) => handleGridCellChange(row.id, 'code', e.target.value)}
                             placeholder="1001"
-                            className="w-full px-3 py-2 border border-slate-300 bg-slate-100 rounded-xl font-mono font-black text-slate-800 text-center text-xs sm:text-sm focus:bg-white focus:border-blue-600 focus:outline-none shadow-xs"
+                            title="يتم توليد السيريال نمبر تلقائياً وغير قابل للتعديل اليدوي"
+                            className="w-full px-3 py-2 border border-slate-300 bg-slate-100 rounded-xl font-mono font-black text-slate-700 text-center text-xs sm:text-sm cursor-not-allowed select-none shadow-inner"
                           />
                         </td>
                         <td className="p-3">
@@ -1066,28 +1068,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <div className="p-4 bg-slate-50 border-t border-slate-200 space-y-3">
               {/* Recipient Input & Order Serial Number */}
               <div className="space-y-3">
-                {/* Document Serial Number Field */}
+                {/* Document Serial Number Field (Locked Official Sequential Number) */}
                 <div>
                   <label className="block text-xs font-extrabold text-slate-800 mb-1 flex items-center justify-between">
-                    <span className="flex items-center gap-1">
+                    <span className="flex items-center gap-1.5">
                       <FileText className="w-3.5 h-3.5 text-blue-600" />
-                      <span>رقم المستند التسلسلي (قابل للتعديل):</span>
+                      <span>رقم المستند التسلسلي (تلقائي غير قابل للتعديل):</span>
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setCustomOrderNo(getNextDeliveryOrderNo())}
-                      className="text-[10px] text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
-                      title="توليد الرقم التلقائي التالي"
-                    >
-                      تلقائي ({getNextDeliveryOrderNo()})
-                    </button>
+                    <span className="text-[11px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-black">
+                      تسلسلي رسمي
+                    </span>
                   </label>
                   <input
                     type="text"
-                    value={customOrderNo}
-                    onChange={(e) => setCustomOrderNo(e.target.value)}
-                    placeholder={getNextDeliveryOrderNo()}
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-black text-blue-900 placeholder-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-none transition"
+                    readOnly
+                    disabled
+                    value={getNextDeliveryOrderNo()}
+                    className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-300 rounded-xl text-xs font-mono font-black text-blue-950 cursor-not-allowed select-none shadow-inner"
                   />
                 </div>
 
@@ -1162,13 +1159,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
             <form onSubmit={handleSaveProduct} className="space-y-4 pt-1">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">الكود / Serial Number</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">الكود / Serial Number</label>
+                  <span className="text-[10px] text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                    تلقائي ومحمي - غير قابل للتعديل
+                  </span>
+                </div>
                 <input
                   type="text"
-                  required
+                  readOnly
+                  disabled
                   value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl font-mono font-bold focus:border-blue-600 focus:outline-none"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 bg-slate-100 rounded-xl font-mono font-black text-slate-700 cursor-not-allowed select-none shadow-inner"
                 />
               </div>
 

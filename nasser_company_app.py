@@ -82,7 +82,7 @@ def get_db_path():
     return os.path.join(get_app_dir(), 'nasser_store.db')
 
 def init_sqlite_db():
-    """تهيئة قاعدة البيانات وإنشاء الجداول وتفعيل وضع الحفظ الدائم WAL على القرص الصلب"""
+    """تهيئة قاعدة البيانات وإنشاء الجداول وتفعيل وضع الحفظ الدائم WAL وترقية المخطط (Schema Migration)"""
     db_path = get_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -178,6 +178,64 @@ def init_sqlite_db():
         )
     ''')
     
+    # --- ترقية وتحديث المخطط التلقائي (AUTOMATIC SCHEMA MIGRATIONS) لحل أي خطأ بالأعمدة القديمة ---
+    def ensure_columns(table_name, columns_to_check):
+        try:
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            existing = [r[1] for r in cursor.fetchall()]
+            for col_name, col_def in columns_to_check:
+                if col_name not in existing:
+                    try:
+                        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def};")
+                    except Exception as ex:
+                        print(f"Migration: add {col_name} to {table_name}:", ex)
+        except Exception as e:
+            print(f"Schema check error on {table_name}:", e)
+
+    # ترقية جدول حركات المخزون للتأكد من وجود الأعمدة بالكامل
+    ensure_columns('movements', [
+        ('reference_no', 'TEXT DEFAULT ""'),
+        ('product_id', 'TEXT DEFAULT ""'),
+        ('product_code', 'TEXT DEFAULT ""'),
+        ('product_name', 'TEXT DEFAULT ""'),
+        ('type', 'TEXT DEFAULT "OUT"'),
+        ('quantity', 'INTEGER DEFAULT 1'),
+        ('previous_stock', 'INTEGER DEFAULT 0'),
+        ('new_stock', 'INTEGER DEFAULT 0'),
+        ('reason', 'TEXT DEFAULT ""'),
+        ('operator_name', 'TEXT DEFAULT "أمين المخزن"'),
+        ('created_at', 'TEXT DEFAULT ""')
+    ])
+
+    # ترقية جدول المنتجات
+    ensure_columns('products', [
+        ('code', 'TEXT DEFAULT ""'),
+        ('name', 'TEXT DEFAULT ""'),
+        ('category', 'TEXT DEFAULT "عام"'),
+        ('stock', 'INTEGER DEFAULT 0'),
+        ('min_stock', 'INTEGER DEFAULT 5'),
+        ('unit', 'TEXT DEFAULT "وحدة"'),
+        ('description', 'TEXT DEFAULT ""'),
+        ('updated_at', 'TEXT DEFAULT ""')
+    ])
+
+    # ترقية جدول المبيعات
+    ensure_columns('sales', [
+        ('invoice_number', 'TEXT DEFAULT ""'),
+        ('created_at', 'TEXT DEFAULT ""'),
+        ('customer_name', 'TEXT DEFAULT ""'),
+        ('customer_phone', 'TEXT DEFAULT ""'),
+        ('cashier_id', 'TEXT DEFAULT ""'),
+        ('cashier_name', 'TEXT DEFAULT ""'),
+        ('subtotal', 'REAL DEFAULT 0'),
+        ('discount', 'REAL DEFAULT 0'),
+        ('tax', 'REAL DEFAULT 0'),
+        ('total', 'REAL DEFAULT 0'),
+        ('payment_method', 'TEXT DEFAULT "CASH"'),
+        ('items_json', 'TEXT DEFAULT "[]"'),
+        ('notes', 'TEXT DEFAULT ""')
+    ])
+
     # تعبئة المنتجات الافتراضية فقط إذا كانت القاعدة جديدة وفارغة تماماً (0 أصناف)
     cursor.execute("SELECT COUNT(*) FROM products")
     if cursor.fetchone()[0] == 0:
