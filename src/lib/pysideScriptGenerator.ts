@@ -49,9 +49,11 @@ def get_dist_path():
     if hasattr(sys, '_MEIPASS') and os.path.exists(os.path.join(sys._MEIPASS, "index.html")):
         return sys._MEIPASS
 
-    # 3. البحث بجانب ملف السكريبت أو ملف الـ EXE
+    # 3. البحث بجانب ملف السكريبت أو ملف الـ EXE وفي مجلد _internal الخاص بـ PyInstaller
     exe_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
     candidates = [
+        os.path.join(exe_dir, "_internal", "dist"),
+        os.path.join(exe_dir, "_internal"),
         os.path.join(exe_dir, "dist"),
         exe_dir,
         os.path.abspath("dist"),

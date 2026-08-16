@@ -90,6 +90,16 @@ export const DesktopAppTab: React.FC = () => {
           </div>
         </div>
 
+        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs flex items-start gap-2.5 text-emerald-950">
+          <div className="p-1 bg-emerald-600 text-white rounded-md mt-0.5 shrink-0 font-mono text-[10px] font-bold">CI/CD</div>
+          <div className="space-y-0.5">
+            <span className="font-bold block text-emerald-900">تجميع وتغليف تلقائي عبر GitHub Actions:</span>
+            <p className="text-[11px] text-emerald-800 leading-relaxed">
+              تم إعداد ملف العمل <code>.github/workflows/window.yml</code> تلقائياً ليقوم عند كل Push أو تشغيل يدوي ببناء مثبت الويندوز الكامل (<code>Nasser_Company_Setup.exe</code>) والنسخة المحمولة (<code>Portable .exe</code>) ورفعها كـ Artifacts جاهزة للتحميل المباشر.
+            </p>
+          </div>
+        </div>
+
         <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl text-xs space-y-1.5 text-slate-700">
           <span className="font-bold text-blue-900 block">⚙️ حلول التغليف المطبقة برمجياً (Production Packaging Engine):</span>
           <p className="text-[11px] leading-relaxed text-slate-600">

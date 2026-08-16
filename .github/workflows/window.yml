@@ -42,18 +42,16 @@ jobs:
           npm install --legacy-peer-deps
           npm run build
 
-      # 5. استخراج سكريبت بايثون الرئيسي تلقائياً من المولد
+      # 5. استخراج سكريبت بايثون الرئيسي تلقائياً من المولد المحدث
       - name: Extract Python Desktop Script (nasser_company_app.py)
         run: |
-          npx tsx -e "import { generatePySideScript } from './src/lib/pysideScriptGenerator.ts'; import fs from 'fs'; fs.writeFileSync('nasser_company_app.py', generatePySideScript(), 'utf-8'); console.log('Successfully generated nasser_company_app.py');"
+          npm run generate:desktop
 
       # 6. تثبيت مكتبات بايثون
       - name: Install Python Desktop Dependencies
         run: |
           python -m pip install --upgrade pip
-          if (-Not (Test-Path requirements.txt)) { New-Item -ItemType File -Path requirements.txt -Force }
-          pip install PySide6 pyinstaller pywebview pillow
-          pip install -r requirements.txt
+          pip install PySide6 pyinstaller pillow
 
       # 7. توليد الأيقونة الخارجية لمكتبات الويندوز مع إجبار ترميز UTF-8
       - name: Generate High-Res External Icon (assets/icon.ico)
@@ -62,12 +60,19 @@ jobs:
         run: |
           python scripts/create_icon.py assets/icon.ico
 
-      # 8. تحويل بايثون إلى مجلد كامل للبرنامج مع دمج حزمة الويب dist (--onedir --add-data)
-      - name: Compile Desktop App to Directory
+      # 8. بناء حزمة التطبيق الموجهة للمثبت (Onedir) مع عزل مجلد الإخراج
+      - name: Compile Desktop App for Installer
         env:
           PYTHONIOENCODING: "utf-8"
         run: |
-          pyinstaller --noconsole --onedir --icon=assets/icon.ico --add-data "dist;dist" --name="NASSER_Company_App" nasser_company_app.py
+          pyinstaller --noconsole --onedir --icon=assets/icon.ico --add-data "dist;dist" --name="NASSER_Company_App" --distpath="py_build_onedir" nasser_company_app.py
+
+      # 8.2 بناء النسخة المحمولة المستقلة (Standalone Portable .exe)
+      - name: Compile Standalone Portable Executable
+        env:
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          pyinstaller --noconsole --onefile --icon=assets/icon.ico --add-data "dist;dist" --name="NASSER_Company_App_Portable" --distpath="py_build_portable" nasser_company_app.py
 
       # 9. إنشاء ملف إعدادات التثبيت (Inno Setup Script) تلقائياً
       - name: Create Inno Setup Script
@@ -89,7 +94,7 @@ jobs:
           Name: "desktopicon"; Description: "إنشاء اختصار على سطح المكتب (Desktop Shortcut)"; GroupDescription: "اختصارات إضافية:"
 
           [Files]
-          Source: "dist\NASSER_Company_App\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "py_build_onedir\NASSER_Company_App\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
           Source: "assets\icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 
           [Icons]
@@ -121,14 +126,23 @@ jobs:
         run: |
           if (Test-Path 'installer_output') {
             Get-ChildItem -Path installer_output -Recurse | ForEach-Object { $_.FullName }
-          } else {
-            Write-Host "installer_output directory not found after ISCC run"
+          }
+          if (Test-Path 'py_build_portable') {
+            Get-ChildItem -Path py_build_portable -Recurse | ForEach-Object { $_.FullName }
           }
 
       # 11. رفع برنامج التثبيت النهائي (Nasser_Company_Setup.exe)
-      - name: Upload Windows Installer Artifact
+      - name: Upload Windows Installer (.exe Setup)
         uses: actions/upload-artifact@v4
         with:
           name: NASSER_Company_Windows_Installer
           path: installer_output/Nasser_Company_Setup.exe
+          if-no-files-found: error
+
+      # 12. رفع النسخة المحمولة المستقلة (Portable Single .exe)
+      - name: Upload Windows Portable (.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NASSER_Company_Portable_Executable
+          path: py_build_portable/NASSER_Company_App_Portable.exe
           if-no-files-found: error

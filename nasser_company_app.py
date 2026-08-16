@@ -1,9 +1,11 @@
 """
 ====================================================================
-شركة NASSER - نظام المبيعات (نسخة مبيعات فقط)
-تطبيق سطح المكتب الاحترافي لشركة ناصر
-يضمن حفظ البيانات الدائم في قاعدة بيانات SQLite محلياً في AppData
-مع Commit فوري لضمان الاستقرار وعدم فقدان البيانات عند انقطاع الكهرباء.
+شركة NASSER - نظام إدارة المخازن والمخزون
+تطبيق سطح المكتب الاحترافي لشركة ناصر (PySide6 Native Desktop App)
+- حل مشكلة المسارات والشاشة البيضاء عبر sys._MEIPASS و get_resource_path
+- قاعدة بيانات SQLite ديناميكية دائمة تحفظ البيانات أوفلاين مدى الحياة
+- طباعة داخلية أصلية 100% عبر PySide6.QtPrintSupport (QPrinter, QPrintDialog)
+- التقاط فوري لاختصار لوحة المفاتيح (Ctrl + P) لطباعة المستند مباشرة
 ====================================================================
 """
 
@@ -17,22 +19,76 @@ import socket
 import http.server
 import socketserver
 
-# --- PERMANENT STORAGE DIRECTORY & DATABASE CONFIGURATION ---
+# --- 1. RESOURCE PATH RESOLVER FOR PYINSTALLER (Fix White Screen) ---
+def get_resource_path(relative_path):
+    """
+    تحديد المسار الدقيق لملفات الواجهة (HTML/JS/CSS/Assets) المدمجة
+    سواء كان التطبيق يعمل في بيئة التطوير أو مجمّعاً داخل ملف .exe مستقل بواسطة PyInstaller.
+    """
+    if hasattr(sys, '_MEIPASS'):
+        # المسار المؤقت الداخلي الذي يستخرجه PyInstaller
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+def get_dist_path():
+    """تحديد مجلد dist المجمّع بدقة تامة"""
+    # 1. البحث داخل _MEIPASS (عند التشغيل من ملف EXE مجمّع بـ --add-data "dist;dist")
+    meipass_dist = get_resource_path("dist")
+    if os.path.exists(os.path.join(meipass_dist, "index.html")):
+        return meipass_dist
+        
+    # 2. البحث المباشر في جذر _MEIPASS (إذا تم تضمين محتويات dist مباشرة)
+    if hasattr(sys, '_MEIPASS') and os.path.exists(os.path.join(sys._MEIPASS, "index.html")):
+        return sys._MEIPASS
+
+    # 3. البحث بجانب ملف السكريبت أو ملف الـ EXE وفي مجلد _internal الخاص بـ PyInstaller
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+    candidates = [
+        os.path.join(exe_dir, "_internal", "dist"),
+        os.path.join(exe_dir, "_internal"),
+        os.path.join(exe_dir, "dist"),
+        exe_dir,
+        os.path.abspath("dist"),
+        os.path.abspath(".")
+    ]
+    for c in candidates:
+        if os.path.exists(os.path.join(c, "index.html")):
+            return c
+            
+    return meipass_dist
+
+def get_html_file_path():
+    """الحصول على المسار المؤكد لملف index.html"""
+    dist_dir = get_dist_path()
+    return os.path.join(dist_dir, "index.html")
+
+# --- 2. DYNAMIC PERMANENT DATABASE CONFIGURATION ---
 def get_app_dir():
-    """الحصول على المسار الدائم للتطبيق في AppData"""
+    """الحصول على المجلد الدائم لقاعدة البيانات في LocalAppData لضمان حفظ التعديلات مدى الحياة"""
     app_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'NasserCompanyApp')
     os.makedirs(app_dir, exist_ok=True)
     return app_dir
 
 def get_db_path():
-    """المسار الثابت لقاعدة بيانات SQLite"""
+    """المسار الثابت لقاعدة بيانات SQLite على القرص الصلب"""
+    # 1. التحقق أولاً إذا كان المستخدم وضع ملف database.db مخصص بجانب الـ EXE
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+    local_side_db = os.path.join(exe_dir, 'nasser_store.db')
+    if os.path.exists(local_side_db):
+        return local_side_db
+
+    # 2. المسار الدائم الرئيسي في AppData
     return os.path.join(get_app_dir(), 'nasser_store.db')
 
 def init_sqlite_db():
-    """تهيئة قاعدة البيانات وإنشاء الجداول تلقائياً إن لم تكن موجودة"""
+    """تهيئة قاعدة البيانات وإنشاء الجداول وتفعيل وضع الحفظ الدائم WAL على القرص الصلب"""
     db_path = get_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    
+    # تفعيل وضع WAL لضمان الحفظ الفوري المقاوم لانقطاع التيار وإغلاق الجهاز لسنوات
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA synchronous=FULL;")
     
     # جدول المنتجات
     cursor.execute('''
@@ -41,7 +97,6 @@ def init_sqlite_db():
             code TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
             category TEXT NOT NULL,
-            unit_price REAL NOT NULL,
             stock INTEGER NOT NULL,
             min_stock INTEGER DEFAULT 5,
             unit TEXT DEFAULT 'وحدة',
@@ -82,20 +137,34 @@ def init_sqlite_db():
             created_at TEXT NOT NULL
         )
     ''')
+
+    # جدول حركات المخزون وأوامر التسليم
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS movements (
+            id TEXT PRIMARY KEY,
+            reference_no TEXT,
+            product_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            reason TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+    ''')
     
-    # تعبئة المنتجات الافتراضية إذا كانت القاعدة فارغة
+    # تعبئة المنتجات الافتراضية فقط إذا كانت القاعدة جديدة وفارغة تماماً (0 أصناف)
     cursor.execute("SELECT COUNT(*) FROM products")
     if cursor.fetchone()[0] == 0:
         now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
         default_products = [
-            ('1', 'PRD-101', 'ماكينة إعداد القهوة المتقدمة NASSER-Pro', 'عام', 4500.0, 50, 5, 'وحدة', '', now_iso),
-            ('2', 'PRD-102', 'طاحونة حبوب القهوة الصناعية 1500W', 'عام', 1850.0, 25, 5, 'وحدة', '', now_iso),
-            ('3', 'PRD-103', 'فلتر مياه نقي خماسي المراحل', 'عام', 320.0, 100, 5, 'وحدة', '', now_iso),
-            ('4', 'PRD-104', 'ميزان حرارة ورطوبة ديجيتال دقيق', 'عام', 150.0, 4, 5, 'وحدة', '', now_iso),
-            ('5', 'PRD-105', 'طابعة فواتير حرارية عالية السرعة 80mm', 'عام', 980.0, 15, 5, 'وحدة', '', now_iso),
+            ('1', 'NASSER-101', 'ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3', 'أجهزة ومعدات', 45, 5, 'وحدة', '', now_iso),
+            ('2', 'NASSER-102', 'طاحونة حبوب القهوة الصناعية 1500W دقيقة التنعيم', 'أجهزة ومعدات', 22, 5, 'وحدة', '', now_iso),
+            ('3', 'NASSER-103', 'طابعة فواتير حرارية عالية السرعة 80mm USB/LAN', 'إلكترونيات ومعدات', 18, 5, 'وحدة', '', now_iso),
+            ('4', 'NASSER-104', 'ميزان إلكتروني ديجيتال دقيق للوزن والجرعات 0.1g', 'أجهزة قياس', 4, 5, 'وحدة', '', now_iso),
+            ('5', 'NASSER-105', 'فلتر تنقية وتقطير المياه خماسي المراحل للمقاهي', 'مستلزمات ومستهلكات', 60, 5, 'وحدة', '', now_iso),
+            ('6', 'NASSER-106', 'مقبض ضغط القهوة اليدوي (Tamper) استانلس ستيل 58mm', 'ملحقات ومستلزمات', 85, 5, 'وحدة', '', now_iso),
         ]
         cursor.executemany(
-            "INSERT INTO products (id, code, name, category, unit_price, stock, min_stock, unit, description, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO products (id, code, name, category, stock, min_stock, unit, description, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             default_products
         )
         conn.commit()
@@ -110,94 +179,21 @@ def init_sqlite_db():
         )
         cursor.execute(
             "INSERT INTO users (id, username, password, name, role, gmail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ('usr_2', 'cashier1', 'sales123', 'مدير المبيعات - أحمد مصطفى', 'SALES_MANAGER', 'cashier.nasser@gmail.com', now_iso)
+            ('usr_2', 'wh_manager', 'wh123', 'أمين المخزن الرئيسي - أحمد مصطفى', 'WAREHOUSE_MANAGER', 'warehouse.nasser@gmail.com', now_iso)
         )
         conn.commit()
 
     conn.close()
 
-# --- NETWORK & PATH UTILITIES ---
-def create_desktop_shortcut_if_missing():
-    """إنشاء اختصار تلقائي على سطح المكتب على نظام ويندوز عند التشغيل"""
-    try:
-        import subprocess
-        if sys.platform != 'win32':
-            return
-        
-        desktop_dir = os.path.join(os.path.expanduser('~'), 'Desktop')
-        if not os.path.exists(desktop_dir):
-            return
-            
-        shortcut_path = os.path.join(desktop_dir, 'شركة ناصر - نسخة مبيعات فقط.lnk')
-        if os.path.exists(shortcut_path):
-            return
-
-        target_exe = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(sys.argv[0])
-        work_dir = os.path.dirname(target_exe)
-        icon_path = os.path.join(work_dir, 'assets', 'icon.ico')
-        if not os.path.exists(icon_path):
-            icon_path = target_exe
-
-        ps_script = f'''
-        $WshShell = New-Object -comObject WScript.Shell
-        $Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
-        $Shortcut.TargetPath = "{target_exe}"
-        $Shortcut.WorkingDirectory = "{work_dir}"
-        $Shortcut.IconLocation = "{icon_path}"
-        $Shortcut.Description = "شركة ناصر - نسخة مبيعات فقط"
-        $Shortcut.Save()
-        '''
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, creationflags=0x08000000)
-    except Exception:
-        pass
-
+# --- 3. EMBEDDED HTTP SERVER WITH SQLITE API BRIDGE ---
 def find_free_port():
     """البحث عن منفذ شبكة محلي متاح تلقائياً"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('127.0.0.1', 0))
         return s.getsockname()[1]
 
-def get_base_dir():
-    """الحصول على المسار الرئيسي عند التشغيل من ملف تنفيذي .exe أو مثبّت"""
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
-
-def get_dist_path():
-    """تحديد المسار الفعلي لمجلد الويب المجمّع dist عند تشغيل الملف التنفيذي .exe والمثبّت"""
-    base_dir = get_base_dir()
-    meipass = getattr(sys, '_MEIPASS', None)
-    
-    candidates = []
-    if meipass:
-        candidates.append(os.path.join(meipass, 'dist'))
-        candidates.append(meipass)
-    
-    candidates.extend([
-        os.path.join(base_dir, 'dist'),
-        base_dir,
-        os.path.abspath('dist'),
-        os.path.abspath('.')
-    ])
-    
-    for cand in candidates:
-        if cand and os.path.exists(os.path.join(cand, 'index.html')):
-            return cand
-            
-    return os.path.join(base_dir, 'dist')
-
-def get_html_file_path():
-    """تحديد المسار المباشر لملف index.html"""
-    dist_dir = get_dist_path()
-    html_path = os.path.join(dist_dir, 'index.html')
-    if not os.path.exists(html_path):
-        base_dir = get_base_dir()
-        html_path = os.path.join(base_dir, 'index.html')
-    return html_path
-
-# --- HTTP HANDLER WITH SQLITE API BRIDGE ---
 class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    """خادم محلي ذكي يربط واجهة الويب بقاعدة بيانات SQLite المحفوظة في AppData"""
+    """خادم محلي يخدم ملفات الويب ويربط الواجهة بقاعدة بيانات SQLite المحلية"""
     
     def __init__(self, *args, **kwargs):
         directory = get_dist_path()
@@ -225,13 +221,13 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 conn = sqlite3.connect(get_db_path())
                 cursor = conn.cursor()
-                cursor.execute("SELECT id, code, name, category, unit_price, stock, min_stock, unit, description, updated_at FROM products")
+                cursor.execute("SELECT id, code, name, category, stock, min_stock, unit, description, updated_at FROM products")
                 rows = cursor.fetchall()
                 conn.close()
                 products = [{
                     "id": r[0], "code": r[1], "name": r[2], "category": r[3],
-                    "unitPrice": r[4], "stock": r[5], "minStock": r[6], "unit": r[7],
-                    "description": r[8] or "", "updatedAt": r[9] or ""
+                    "stock": r[4], "minStock": r[5], "unit": r[6],
+                    "description": r[7] or "", "updatedAt": r[8] or ""
                 } for r in rows]
                 return self._send_json({"success": True, "products": products})
             except Exception as e:
@@ -256,7 +252,38 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 return self._send_json({"success": False, "error": str(e)}, 500)
 
-        # 3. API GET Users
+        # 3. API GET Movements
+        if parsed_path == '/api/movements':
+            try:
+                conn = sqlite3.connect(get_db_path())
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT m.id, m.reference_no, m.product_id, p.code, p.name, m.type, m.quantity, m.reason, m.created_at
+                    FROM movements m
+                    LEFT JOIN products p ON m.product_id = p.id
+                    ORDER BY m.created_at DESC
+                ''')
+                rows = cursor.fetchall()
+                conn.close()
+                movements = [{
+                    "id": r[0],
+                    "referenceNo": r[1] or "",
+                    "productId": r[2],
+                    "productCode": r[3] or "",
+                    "productName": r[4] or "صنف مخزني",
+                    "type": r[5],
+                    "quantity": r[6],
+                    "previousStock": 0,
+                    "newStock": 0,
+                    "reason": r[7] or "",
+                    "timestamp": r[8] or "",
+                    "operatorName": "أمين المخزن"
+                } for r in rows]
+                return self._send_json({"success": True, "movements": movements})
+            except Exception as e:
+                return self._send_json({"success": False, "error": str(e)}, 500)
+
+        # 4. API GET Users
         if parsed_path == '/api/users':
             try:
                 conn = sqlite3.connect(get_db_path())
@@ -265,87 +292,53 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 rows = cursor.fetchall()
                 conn.close()
                 users = [{
-                    "id": r[0], "username": r[1], "name": r[2], "role": r[3], "gmail": r[4], "createdAt": r[5]
+                    "id": r[0], "username": r[1], "name": r[2],
+                    "role": r[3], "gmail": r[4], "createdAt": r[5]
                 } for r in rows]
                 return self._send_json({"success": True, "users": users})
             except Exception as e:
                 return self._send_json({"success": False, "error": str(e)}, 500)
 
-        # Static assets serving
-        dist_dir = get_dist_path()
-        req_path = parsed_path.lstrip('/')
-        full_path = os.path.join(dist_dir, req_path)
-        if not os.path.exists(full_path) and not req_path.startswith('assets/'):
+        # 5. SPA Fallback
+        req_path = self.translate_path(self.path)
+        if not os.path.exists(req_path) or os.path.isdir(req_path):
             self.path = '/index.html'
+            
         return super().do_GET()
 
     def do_POST(self):
         parsed_path = self.path.split('?')[0]
 
-        # 1. Login Endpoint
+        # 1. User Authentication (Login)
         if parsed_path == '/api/auth/login':
             data = self._read_json_body()
-            username = data.get('username')
-            password = data.get('password')
+            username = data.get('username', '').strip()
+            password = data.get('password', '').strip()
             conn = sqlite3.connect(get_db_path())
             cursor = conn.cursor()
-            cursor.execute("SELECT id, username, name, role, gmail, created_at FROM users WHERE username=? AND password=?", (username, password))
+            cursor.execute("SELECT id, username, name, role, gmail FROM users WHERE username=? AND password=?", (username, password))
             row = cursor.fetchone()
             conn.close()
             if row:
-                user = {"id": row[0], "username": row[1], "name": row[2], "role": row[3], "gmail": row[4], "createdAt": row[5]}
-                return self._send_json({"success": True, "user": user})
-            return self._send_json({"success": False, "message": "اسم المستخدم أو كلمة السر غير صحيحة"}, 401)
+                user = {"id": row[0], "username": row[1], "name": row[2], "role": row[3], "gmail": row[4]}
+                return self._send_json({"success": True, "user": user, "message": "تم تسجيل الدخول بنجاح"})
+            else:
+                return self._send_json({"success": False, "message": "اسم المستخدم أو كلمة المرور غير صحيحة"}, 401)
 
-        # 1b. Reset Password Offline Endpoint
-        if parsed_path in ['/api/auth/reset-password-offline', '/api/auth/reset-password']:
-            data = self._read_json_body()
-            username = data.get('username')
-            old_pass = data.get('oldPassword')
-            new_pass = data.get('newPassword')
-            if not username or not old_pass or not new_pass:
-                return self._send_json({"success": False, "message": "بيانات غير مكتملة، يرجى تقديم اسم المستخدم، كلمة المرور القديمة، وكلمة المرور الجديدة"}, 400)
-            conn = sqlite3.connect(get_db_path())
-            cursor = conn.cursor()
-            cursor.execute("SELECT password FROM users WHERE username=?", (username,))
-            row = cursor.fetchone()
-            if not row:
-                conn.close()
-                return self._send_json({"success": False, "message": "اسم المستخدم غير موجود بالنظام"}, 404)
-            if row[0] != old_pass:
-                conn.close()
-                return self._send_json({"success": False, "message": "كلمة المرور القديمة / الحالية غير صحيحة"}, 400)
-            cursor.execute("UPDATE users SET password=? WHERE username=?", (new_pass, username))
-            updated_count = cursor.rowcount
-            conn.commit()
-            conn.close()
-            if updated_count > 0:
-                return self._send_json({"success": True, "message": "تم التحقق من كلمة المرور القديمة وتحديث كلمة السر بنجاح في التطبيق المحلي وإلغاء القديمة تماماً"})
-            return self._send_json({"success": False, "message": "حدث خطأ أثناء تحديث كلمة المرور"}, 500)
-
-        # 2. Add Sale (With Immediate Atomic Commit & Sequential Numbering)
+        # 2. Add Sale Invoice
         if parsed_path == '/api/sales':
             data = self._read_json_body()
+            items = data.get('items', [])
+            
             conn = sqlite3.connect(get_db_path())
             cursor = conn.cursor()
             
-            # Query max sequence number from SQLite sales table
-            cursor.execute("SELECT invoice_number FROM sales")
-            existing_rows = cursor.fetchall()
-            max_seq = 0
-            import re
-            for r in existing_rows:
-                if r[0]:
-                    nums = re.findall(r'd+', r[0])
-                    if nums:
-                        val = int(nums[-1])
-                        if val > max_seq:
-                            max_seq = val
-            next_seq = max_seq + 1
-            invoice_num = f"ناصر-{next_seq:04d}"
+            cursor.execute("SELECT COUNT(*) FROM sales")
+            count = cursor.fetchone()[0] + 1
+            invoice_num = f"INV-{time.strftime('%Y%m')}-{count:04d}"
+            
             sale_id = "sale_" + str(int(time.time() * 1000))
             created_at = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-            items = data.get('items', [])
             
             cursor.execute('''
                 INSERT INTO sales (id, invoice_number, created_at, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, items_json, notes)
@@ -365,13 +358,18 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 data.get('notes', '')
             ))
             
-            # خصم الكميات من المخزن فوراً
             for item in items:
                 p_code = item.get('productCode')
-                qty = item.get('quantity', 1)
-                cursor.execute("UPDATE products SET stock = MAX(0, stock - ?) WHERE code = ?", (qty, p_code))
+                p_id = item.get('productId')
+                try:
+                    qty = int(item.get('quantity', 1))
+                except Exception:
+                    qty = 1
+                if p_code:
+                    cursor.execute("UPDATE products SET stock = MAX(0, stock - ?) WHERE code = ?", (qty, p_code))
+                elif p_id:
+                    cursor.execute("UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?", (qty, p_id))
             
-            # COMMIT فوري على القرص الصلب لتجنب فقدان البيانات
             conn.commit()
             conn.close()
             
@@ -388,7 +386,77 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             }
             return self._send_json({"success": True, "sale": new_sale, "message": "تم حفظ الفاتورة بنجاح في قاعدة البيانات المحلية"})
 
-        # 3. Add Product (With Immediate Commit)
+        # 3. Movement Endpoint (Delivery Orders & Stock Adjustments)
+        if parsed_path == '/api/movements':
+            data = self._read_json_body()
+            p_id = str(data.get('productId', ''))
+            m_type = data.get('type', 'OUT')
+            ref_no = data.get('referenceNo', '')
+            reason_str = data.get('reason', '')
+            try:
+                qty = int(data.get('quantity', 1))
+            except Exception:
+                qty = 1
+            
+            mov_id = "mov_" + str(int(time.time() * 1000))
+            now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+            conn = sqlite3.connect(get_db_path())
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT id, code, name, stock FROM products WHERE id=? OR code=?", (p_id, p_id))
+            p_row = cursor.fetchone()
+            
+            actual_id = p_id
+            p_code = ""
+            p_name = "صنف مخزني"
+            previous_stock = 0
+            new_stock = 0
+
+            if p_row:
+                actual_id = p_row[0]
+                p_code = p_row[1]
+                p_name = p_row[2]
+                previous_stock = int(p_row[3])
+                
+                if m_type == 'IN':
+                    new_stock = previous_stock + qty
+                elif m_type == 'OUT':
+                    new_stock = max(0, previous_stock - qty)
+                elif m_type == 'ADJUSTMENT':
+                    new_stock = max(0, qty)
+                else:
+                    new_stock = previous_stock
+                
+                cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
+            else:
+                new_stock = max(0, qty)
+
+            cursor.execute('''
+                INSERT INTO movements (id, reference_no, product_id, type, quantity, reason, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (mov_id, ref_no, actual_id, m_type, qty, reason_str, now_iso))
+
+            conn.commit()
+            conn.close()
+
+            movement_obj = {
+                "id": mov_id,
+                "productId": actual_id,
+                "productCode": p_code,
+                "productName": p_name,
+                "type": m_type,
+                "quantity": qty,
+                "previousStock": previous_stock,
+                "newStock": new_stock,
+                "reason": reason_str,
+                "referenceNo": ref_no,
+                "operatorName": data.get('operatorName', 'أمين المخزن'),
+                "timestamp": now_iso
+            }
+            return self._send_json({"success": True, "movement": movement_obj, "message": "تم حفظ تحديث الكمية في قاعدة البيانات الدائمة SQLite بنجاح"})
+
+        # 4. Add Product
         if parsed_path == '/api/products':
             data = self._read_json_body()
             conn = sqlite3.connect(get_db_path())
@@ -396,11 +464,11 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             p_id = "prd_" + str(int(time.time() * 1000))
             now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
             cursor.execute('''
-                INSERT INTO products (id, code, name, category, unit_price, stock, min_stock, unit, description, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO products (id, code, name, category, stock, min_stock, unit, description, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 p_id, data.get('code'), data.get('name'), data.get('category', 'عام'),
-                float(data.get('unitPrice', 0)), int(data.get('stock', 0)),
+                int(data.get('stock', 0)),
                 int(data.get('minStock', 5)), data.get('unit', 'وحدة'),
                 data.get('description', ''), now_iso
             ))
@@ -419,11 +487,11 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             cursor = conn.cursor()
             now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
             cursor.execute('''
-                UPDATE products SET code=?, name=?, category=?, unit_price=?, stock=?, min_stock=?, unit=?, description=?, updated_at=?
+                UPDATE products SET code=?, name=?, category=?, stock=?, min_stock=?, unit=?, description=?, updated_at=?
                 WHERE id=?
             ''', (
                 data.get('code'), data.get('name'), data.get('category', 'عام'),
-                float(data.get('unitPrice', 0)), int(data.get('stock', 0)),
+                int(data.get('stock', 0)),
                 int(data.get('minStock', 5)), data.get('unit', 'وحدة'),
                 data.get('description', ''), now_iso, p_id
             ))
@@ -454,77 +522,143 @@ def start_local_server(port):
     with socketserver.TCPServer(("127.0.0.1", port), handler) as httpd:
         httpd.serve_forever()
 
+# --- 4. NATIVE PYSIDE6 MAIN APPLICATION WINDOW CLASS & GPU FLICKER FIX ---
+# إيقاف التسريع البرمجي لـ GPU لمنع ارتجاف وتداخل النوافذ المنبثقة (Modal & Dialog Flickering Fix)
+os.environ["QT_WEBENGINE_DISABLE_GPU"] = "1"
+os.environ["QT_QUICK_BACKEND"] = "software"
+os.environ["QSG_RENDER_LOOP"] = "basic"
+
+try:
+    from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QFileDialog, QDialog
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWebEngineCore import QWebEngineSettings
+    from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrinterInfo
+    from PySide6.QtGui import QKeySequence, QShortcut, QIcon
+    from PySide6.QtCore import QUrl, Qt
+
+    class NasserMainWindow(QMainWindow):
+        def __init__(self, app_url):
+            super().__init__()
+            self.app_url = app_url
+            self.setWindowTitle("شركة NASSER - نظام إدارة المخازن والمخزون")
+            self.resize(1366, 850)
+            
+            # ضبط خصائص ثبات النافذة
+            self.setAttribute(Qt.WA_NativeWindow, True)
+            
+            # تهيئة محرك عرض الويب الداخلي
+            self.web_view = QWebEngineView(self)
+            self.web_view.setAttribute(Qt.WA_NativeWindow, True)
+            
+            # تفعيل إعدادات الطباعة الأصلية وخلفيات الألوان بدقة
+            settings = self.web_view.settings()
+            settings.setAttribute(QWebEngineSettings.WebAttribute.PrintElementBackgrounds, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.ShowScrollBars, True)
+            
+            # ربط إشارة الطباعة الداخلية الخاصة بـ QWebEnginePage
+            self.web_view.page().printRequested.connect(self.print_function)
+            
+            # ربط اختصار لوحة المفاتيح الصريح Ctrl + P داخل نافذة التطبيق
+            self.shortcut_print = QShortcut(QKeySequence("Ctrl+P"), self)
+            self.shortcut_print.activated.connect(self.print_function)
+            
+            # تحميل الواجهة عبر الرابط المحلي للخادم الداخلي
+            self.web_view.setUrl(QUrl(self.app_url))
+            self.setCentralWidget(self.web_view)
+
+        def print_function(self):
+            """
+            دالة الطباعة الأصلية 100% (Native Qt Printing)
+            تأخذ محتوى الـ QWebEngineView وتمرره مباشرة إلى QPrinter لإظهار حوار طباعة ويندوز
+            """
+            try:
+                printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+                printer.setFullPage(True)
+                
+                # فتح حوار طباعة ويندوز الأصلي مباشرة مع تثبيت الأب والنمطية لمنع أي ارتجاف
+                print_dialog = QPrintDialog(printer, self)
+                print_dialog.setWindowTitle("طباعة أمر تسليم مخزن - شركة ناصر")
+                print_dialog.setAttribute(Qt.WA_NativeWindow, True)
+                print_dialog.setWindowModality(Qt.ApplicationModal)
+                
+                if print_dialog.exec() == QPrintDialog.DialogCode.Accepted:
+                    self.web_view.page().print(printer, lambda success: None)
+            except Exception as pe:
+                print("Native Print Error:", pe)
+                # بديل مباشر لحفظ المستند كملف PDF إذا لم تكن هناك طابعة فيزيائية معرفة
+                try:
+                    save_dialog = QFileDialog(self, "حفظ أمر التسليم كملف PDF", os.path.expanduser("~/Desktop/DeliveryOrder.pdf"), "PDF Files (*.pdf)")
+                    save_dialog.setAttribute(Qt.WA_NativeWindow, True)
+                    save_dialog.setWindowModality(Qt.ApplicationModal)
+                    save_dialog.setAcceptMode(QFileDialog.AcceptSave)
+                    
+                    if save_dialog.exec() == QDialog.Accepted:
+                        selected_files = save_dialog.selectedFiles()
+                        if selected_files:
+                            pdf_path = selected_files[0]
+                            self.web_view.page().printToPdf(pdf_path)
+                            msg = QMessageBox(self)
+                            msg.setAttribute(Qt.WA_NativeWindow, True)
+                            msg.setWindowModality(Qt.ApplicationModal)
+                            msg.setWindowTitle("تم الحفظ بنجاح")
+                            msg.setText(f"تم حفظ أمر التسليم كملف PDF في المسار:\n{pdf_path}")
+                            msg.setIcon(QMessageBox.Information)
+                            msg.exec()
+                except Exception as save_err:
+                    err_msg = QMessageBox(self)
+                    err_msg.setAttribute(Qt.WA_NativeWindow, True)
+                    err_msg.setWindowModality(Qt.ApplicationModal)
+                    err_msg.setWindowTitle("تنبيه الطباعة")
+                    err_msg.setText(f"تعذر الاتصال بالطابعة:\n{pe}")
+                    err_msg.setIcon(QMessageBox.Warning)
+                    err_msg.exec()
+
+except ImportError:
+    pass
+
 def main():
     # 1. تهيئة قاعدة بيانات SQLite الدائمة في AppData عند التشغيل
     init_sqlite_db()
 
-    # 2. إنشاء اختصار سطح المكتب تلقائياً إذا لم يكن موجوداً
-    create_desktop_shortcut_if_missing()
-
     port = find_free_port()
     
-    # 2. تشغيل خادم المبيعات والخادم المحلي في خيط منفصل (Background Thread)
+    # 2. تشغيل خادم التطبيق المحلي في خيط منفصل (Background Thread)
     server_thread = threading.Thread(target=start_local_server, args=(port,), daemon=True)
     server_thread.start()
     
     app_url = f"http://127.0.0.1:{port}"
-    app_title = "شركة NASSER - نظام المبيعات (نسخة مبيعات فقط)"
 
-    # المحرك الأول: pywebview مع تحديد مجلد البيانات الدائم في AppData
+    # 3. تشغيل نافذة تطبيق PySide6 الأصلية مع ضبط إعدادات التوافق وإلغاء التسريع البرمجي للـ GPU
     try:
-        import webview
-        app_data_dir = get_app_dir()
-        window = webview.create_window(
-            title=app_title,
-            url=app_url,
-            width=1366,
-            height=850,
-            resizable=True,
-            min_size=(1024, 600),
-            confirm_close=False
-        )
-        webview.start(private_mode=False, storage_path=app_data_dir)
-        return
-    except Exception as e:
-        print(f"Notice: pywebview not initialized ({e}), switching to PySide6 QWebEngineView fallback...")
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
 
-    # المحرك الثاني: PySide6 QWebEngineView (محرك Chromium المدمج)
-    try:
-        from PySide6.QtWidgets import QApplication, QMainWindow
-        from PySide6.QtWebEngineWidgets import QWebEngineView
-        from PySide6.QtCore import QUrl
+        # إيقاف التداخل البرمجي لبطاقة الشاشة للنوافذ الفرعية ومنع الارتجاف
+        QApplication.setAttribute(Qt.AA_UseSoftwareOpenGL, True)
+        
+        # تمرير معاملات إلغاء تسريع GPU لمحرك Chromium / WebEngine
+        sys.argv.extend([
+            "--disable-gpu",
+            "--disable-gpu-compositing",
+            "--in-process-gpu"
+        ])
         
         app = QApplication(sys.argv)
-        app.setApplicationName(app_title)
+        app.setApplicationName("شركة NASSER - إدارة المخازن")
         
-        window = QMainWindow()
-        window.setWindowTitle(app_title)
-        window.resize(1366, 850)
-        
-        web_view = QWebEngineView()
-        
-        # تحديد مسار index.html وتحميله عبر QUrl
-        html_path = get_html_file_path()
-        if os.path.exists(html_path):
-            web_view.setUrl(QUrl.fromLocalFile(html_path))
-        else:
-            web_view.setUrl(QUrl(app_url))
-            
-        window.setCentralWidget(web_view)
-        
-        window.showMaximized()
+        main_win = NasserMainWindow(app_url)
+        main_win.showMaximized()
         sys.exit(app.exec())
+        
+    except ImportError as ie:
+        print(f"CRITICAL: PySide6 is required. Please install it using: pip install PySide6 ({ie})")
+        sys.exit(1)
     except Exception as e:
-        print(f"Notice: PySide6 QWebEngineView not available ({e}), opening default system browser...")
-
-    # المحرك الثالث: متصفح النظام العادي
-    import webbrowser
-    webbrowser.open(app_url)
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        sys.exit(0)
+        print(f"CRITICAL Error launching PySide6 Native GUI: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
