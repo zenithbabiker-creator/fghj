@@ -190,7 +190,7 @@ const DEFAULT_DB: DBData = {
     googleSheetUrl: 'https://docs.google.com/spreadsheets/d/1NasserCompanyConfig/edit#gid=0',
     rateLimitThreshold: 15,
     appName: 'شركة NASSER - نظام إدارة المخازن والمخزون',
-    companyAddress: 'الخرطوم - شارع الستين الرئيسي',
+    companyAddress: 'أمدرمان',
     companyPhone: '0913247564',
   },
 };
@@ -662,6 +662,25 @@ app.delete('/api/products/:id', (req, res) => {
   res.json({ success: true, message: 'تم حذف الصنف من قاعدة البيانات بنجاح' });
 });
 
+// Helper for resilient product lookup (by ID, exact code, trimmed case-insensitive, or space/dash-free code)
+function findProductInList(products: Product[], idOrCode: string): Product | undefined {
+  if (!idOrCode) return undefined;
+  const cleanKey = String(idOrCode).trim();
+  const lowerKey = cleanKey.toLowerCase();
+  const denseKey = lowerKey.replace(/[\s\-_/.]/g, '');
+
+  return products.find(p => {
+    if (p.id === cleanKey || p.code === cleanKey) return true;
+    if (p.id.toLowerCase() === lowerKey || p.code.toLowerCase() === lowerKey) return true;
+    if (denseKey.length > 0) {
+      const pDenseCode = p.code.toLowerCase().replace(/[\s\-_/.]/g, '');
+      const pDenseId = p.id.toLowerCase().replace(/[\s\-_/.]/g, '');
+      if (pDenseCode === denseKey || pDenseId === denseKey) return true;
+    }
+    return false;
+  });
+}
+
 // STOCK MOVEMENTS - Process In / Out / Adjustment
 app.post('/api/movements', (req, res) => {
   const { productId, type, quantity, reason, referenceNo, operatorName, role } = req.body;
@@ -672,7 +691,7 @@ app.post('/api/movements', (req, res) => {
   }
 
   const db = readDB();
-  const product = db.products.find(p => p.id === productId);
+  const product = findProductInList(db.products, productId);
   if (!product) {
     return res.status(404).json({ success: false, message: 'الصنف غير موجود بالمخزن' });
   }
@@ -751,6 +770,84 @@ app.post('/api/movements', (req, res) => {
     product,
     movement,
     message: `تم تسجيل الحركة المخزنية وتحديث رصيد (${product.name}) بنجاح إلى ${newStock} وحدة`,
+  });
+});
+
+// STOCK MOVEMENTS - Process Batch Delivery Order / Movements Atomically
+app.post('/api/movements/batch', (req, res) => {
+  const { items, referenceNo, reason, operatorName, role } = req.body;
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ success: false, message: 'لا توجد أصناف في أمر التسليم' });
+  }
+
+  const db = readDB();
+  const opName = operatorName || 'أمين المخزن';
+  const now = new Date().toISOString();
+  const refNo = (referenceNo || '').trim() || '1';
+  const reasonText = (reason || '').trim() || 'أمر تسليم مخزن';
+
+  // 1. Validation phase: check that all items exist and have sufficient stock
+  for (const itm of items) {
+    const pId = itm.productId;
+    const qty = Number(itm.quantity) || 1;
+    const prod = findProductInList(db.products, pId);
+    if (!prod) {
+      return res.status(404).json({ success: false, message: `الصنف ذو المعرف أو الكود (${pId}) غير موجود بالمخزن` });
+    }
+    if (prod.stock < qty) {
+      return res.status(400).json({
+        success: false,
+        message: `الرصيد المتاح من (${prod.name}) هو ${prod.stock} فقط، ولا يكفي لصرف كمية ${qty}`,
+      });
+    }
+  }
+
+  // 2. Execution phase: deduct stock and record movements
+  const createdMovements: StockMovement[] = [];
+  for (const itm of items) {
+    const pId = itm.productId;
+    const qty = Number(itm.quantity) || 1;
+    const prod = findProductInList(db.products, pId)!;
+    const previousStock = prod.stock;
+    const newStock = Math.max(0, previousStock - qty);
+
+    prod.stock = newStock;
+    prod.updatedAt = now;
+
+    const movement: StockMovement = {
+      id: `mvt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      productId: prod.id,
+      productCode: prod.code,
+      productName: prod.name,
+      type: 'OUT',
+      quantity: qty,
+      previousStock,
+      newStock,
+      reason: reasonText,
+      referenceNo: refNo,
+      operatorName: opName,
+      timestamp: now,
+    };
+
+    db.movements.unshift(movement);
+    createdMovements.push(movement);
+  }
+
+  writeDB(db);
+
+  addAuditLog(
+    opName,
+    role || 'WAREHOUSE_MANAGER',
+    'صرف أمر تسليم مخزن (دفعة واحدة)',
+    `تم صرف عدد (${createdMovements.length}) أصناف بموجب أمر تسليم تسلسلي رقم [${refNo}] بنجاح`,
+    'MOVEMENT'
+  );
+
+  res.json({
+    success: true,
+    message: `تم صرف وتوثيق أمر التسليم رقم [${refNo}] بنجاح`,
+    movements: createdMovements,
   });
 });
 

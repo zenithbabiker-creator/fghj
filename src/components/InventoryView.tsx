@@ -38,6 +38,11 @@ interface InventoryViewProps {
     reason: string;
     referenceNo?: string;
   }) => Promise<{ success: boolean; message?: string }>;
+  onBatchStockMovement?: (data: {
+    items: Array<{ productId: string; quantity: number }>;
+    reason: string;
+    referenceNo: string;
+  }) => Promise<{ success: boolean; message?: string; movements?: StockMovement[] }>;
   onBack?: () => void;
 }
 
@@ -50,6 +55,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onUpdateProduct,
   onDeleteProduct,
   onStockMovement,
+  onBatchStockMovement,
   onBack,
 }) => {
   const isGeneralManager = currentUser?.role === 'GENERAL_MANAGER';
@@ -243,7 +249,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setFormError('');
 
     try {
-      const dispatchItemsToPrint: DispatchItem[] = [];
       const finalOrderNo = getNextDeliveryOrderNo();
 
       // Persist generated order sequence number immediately
@@ -259,28 +264,49 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         }
       }
 
-      for (const item of cartItems) {
-        const res = await onStockMovement({
-          productId: item.product.id,
-          type: 'OUT',
-          quantity: item.quantity,
-          reason: `أمر تسليم مخزن - المستلم: ${recipientName.trim()}`,
+      const dispatchItemsToPrint: DispatchItem[] = cartItems.map(item => ({
+        product: item.product,
+        quantity: item.quantity,
+      }));
+
+      // Use atomic batch movement if available (100% resilient against Database Lock)
+      if (onBatchStockMovement) {
+        const res = await onBatchStockMovement({
+          items: cartItems.map(item => ({
+            productId: item.product.id,
+            quantity: item.quantity,
+          })),
           referenceNo: finalOrderNo,
+          reason: `أمر تسليم مخزن - المستلم: ${recipientName.trim()}`,
         });
 
         if (res && res.success === false) {
-          const errMsg = res.message || `خطأ أثناء صرف الصنف (${item.product.name})`;
+          const errMsg = res.message || 'فشلت عملية صرف أمر التسليم';
           setFormError(errMsg);
           alert(`فشلت العملية: ${errMsg}`);
           return;
         }
+      } else {
+        // Fallback for sequential stock movement
+        for (const item of cartItems) {
+          const res = await onStockMovement({
+            productId: item.product.id,
+            type: 'OUT',
+            quantity: item.quantity,
+            reason: `أمر تسليم مخزن - المستلم: ${recipientName.trim()}`,
+            referenceNo: finalOrderNo,
+          });
 
-        dispatchItemsToPrint.push({
-          product: item.product,
-          quantity: item.quantity,
-        });
+          if (res && res.success === false) {
+            const errMsg = res.message || `خطأ أثناء صرف الصنف (${item.product.name})`;
+            setFormError(errMsg);
+            alert(`فشلت العملية: ${errMsg}`);
+            return;
+          }
+        }
       }
 
+      // Success: activate print dialog & reset form
       setActiveDeliveryOrderNo(finalOrderNo);
       setActiveRecipientName(recipientName.trim());
       setActiveDeliveryItems(dispatchItemsToPrint);
@@ -288,36 +314,52 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       setRecipientName('');
       setCustomOrderNo('');
     } catch (err: any) {
-      setFormError('حدث خطأ أثناء توليد أمر تسليم المخزن');
+      setFormError('حدث خطأ أثناء توليد أمر تسليم المخزن: ' + (err?.message || ''));
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Auto-generate sequential product code
+  // Universal Helper to extract numeric values and prefix patterns from any code format
+  const extractCodeInfo = (codeStr: string) => {
+    if (!codeStr || typeof codeStr !== 'string') return { prefix: '', num: 0, suffix: '', full: '' };
+    const clean = codeStr.trim();
+    const matches = Array.from(clean.matchAll(/\d+/g));
+    if (matches.length > 0) {
+      const lastMatch = matches[matches.length - 1];
+      const num = parseInt(lastMatch[0], 10);
+      const prefix = clean.substring(0, lastMatch.index);
+      const suffix = clean.substring((lastMatch.index || 0) + lastMatch[0].length);
+      return { prefix, num: isNaN(num) ? 0 : num, suffix, full: clean };
+    }
+    return { prefix: clean, num: 0, suffix: '', full: clean };
+  };
+
+  // Auto-generate sequential product code preserving user's prefix pattern (if any)
   const generateNextCode = (productsList: Product[]) => {
     if (!productsList || productsList.length === 0) return '101';
     let maxNum = 100;
+    let detectedPrefix = '';
+
     productsList.forEach(p => {
-      const match = p.code.match(/\d+/);
-      if (match) {
-        const num = parseInt(match[0], 10);
-        if (!isNaN(num) && num > maxNum) {
-          maxNum = num;
-        }
+      const info = extractCodeInfo(p.code);
+      if (info.num > maxNum) {
+        maxNum = info.num;
+        detectedPrefix = info.prefix;
       }
     });
+
+    if (detectedPrefix) {
+      return `${detectedPrefix}${maxNum + 1}`;
+    }
     return String(maxNum + 1);
   };
 
   const getMaxNumericCode = () => {
     let maxNum = 100;
     products.forEach(p => {
-      const match = p.code.match(/\d+/);
-      if (match) {
-        const num = parseInt(match[0], 10);
-        if (!isNaN(num) && num > maxNum) maxNum = num;
-      }
+      const info = extractCodeInfo(p.code);
+      if (info.num > maxNum) maxNum = info.num;
     });
     return maxNum;
   };
@@ -349,7 +391,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setIsBatchAddMode(true);
   };
 
-  // Process Excel Paste Text
+  // Process Excel Paste Text with universal format detection
   const processPastedText = (text: string) => {
     if (!text || !text.trim()) return;
 
@@ -358,11 +400,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
     let currentCodeNum = getMaxNumericCode();
     gridRows.forEach(r => {
-      const match = r.code.match(/\d+/);
-      if (match) {
-        const num = parseInt(match[0], 10);
-        if (!isNaN(num) && num > currentCodeNum) currentCodeNum = num;
-      }
+      const info = extractCodeInfo(r.code);
+      if (info.num > currentCodeNum) currentCodeNum = info.num;
     });
 
     const parsedRows: Array<{ id: string; code: string; name: string; stock: string }> = [];
@@ -375,22 +414,31 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       let rowStock = '1';
       let rowCode = '';
 
-      if (columns.length >= 2) {
-        if (/^\d+$/.test(columns[0]) && columns[1]) {
-          rowCode = columns[0];
-          rowName = columns[1];
-          if (columns[2] && /^\d+$/.test(columns[2])) {
-            rowStock = columns[2];
-          }
+      if (columns.length >= 3) {
+        // [Code, Name, Stock] or [Code, Name, Category/Desc, Stock]
+        rowCode = columns[0];
+        rowName = columns[1];
+        const lastCol = columns[columns.length - 1];
+        const secondLastCol = columns[2];
+        if (/^\d+$/.test(lastCol)) {
+          rowStock = lastCol;
+        } else if (/^\d+$/.test(secondLastCol)) {
+          rowStock = secondLastCol;
+        }
+      } else if (columns.length === 2) {
+        const col0 = columns[0];
+        const col1 = columns[1];
+        // If col1 is numeric -> [Name, Stock]
+        if (/^\d+$/.test(col1)) {
+          rowName = col0;
+          rowStock = col1;
         } else {
-          rowName = columns[0];
-          if (/^\d+$/.test(columns[1])) {
-            rowStock = columns[1];
-          } else {
-            rowName = `${columns[0]} ${columns[1]}`;
-          }
+          // [Code, Name] -> e.g. ["RDB 107", "كابل شبكات"] or ["NASSER-101", "راوتر"]
+          rowCode = col0;
+          rowName = col1;
         }
       } else {
+        // Single column -> Product Name
         rowName = columns[0];
       }
 
@@ -424,11 +472,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setGridRows(prev => {
       let maxNum = getMaxNumericCode();
       prev.forEach(r => {
-        const match = r.code.match(/\d+/);
-        if (match) {
-          const num = parseInt(match[0], 10);
-          if (!isNaN(num) && num > maxNum) maxNum = num;
-        }
+        const info = extractCodeInfo(r.code);
+        if (info.num > maxNum) maxNum = info.num;
       });
       return [
         ...prev,

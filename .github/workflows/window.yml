@@ -79,16 +79,25 @@ jobs:
         run: |
           $innoScript = @"
           [Setup]
+          AppId={{8B84180A-24E0-4828-A4FB-B780EC82D884}
           AppName=شركة ناصر - إدارة المخازن والمبيعات
-          AppVersion=1.0
+          AppVersion=1.0.1
+          AppPublisher=محمد بابكر
+          AppPublisherURL=https://nasser-company.com
+          AppSupportURL=https://nasser-company.com
+          AppUpdatesURL=https://nasser-company.com
+          AppCopyright=حقوق النشر © 2026 محمد بابكر - شركة ناصر
           DefaultDirName={autopf}\NasserCompanyApp
           DefaultGroupName=شركة ناصر
           UninstallDisplayIcon={app}\NASSER_Company_App.exe
           Compression=lzma2
           SolidCompression=yes
           OutputDir=installer_output
-          OutputBaseFilename=Nasser_Company_Setup
+          OutputBaseFilename=Nasser_Company_Setup_v1.0.1
           SetupIconFile=assets\icon.ico
+          ArchitecturesInstallIn64BitMode=x64compatible
+          DisableProgramGroupPage=yes
+          PrivilegesRequired=lowest
 
           [Tasks]
           Name: "desktopicon"; Description: "إنشاء اختصار على سطح المكتب (Desktop Shortcut)"; GroupDescription: "اختصارات إضافية:"

@@ -304,6 +304,87 @@ export default function App() {
     return { success: true, message: 'تم تسجل الحركة المخزنية محلياً بنجاح', movement: newMovement };
   };
 
+  // Batch Stock Movements Handler (Delivery Orders - Atomic Execution)
+  const handleBatchStockMovement = async (batchData: {
+    items: Array<{ productId: string; quantity: number }>;
+    reason: string;
+    referenceNo: string;
+  }) => {
+    try {
+      const res = await safeJsonFetch('/api/movements/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...batchData,
+          operatorName: currentUser?.name || 'أمين المخزن',
+          role: currentUser?.role,
+        }),
+      });
+
+      if (res.isJson && res.data) {
+        if (res.data.success) {
+          await fetchProducts();
+          await fetchMovements();
+          await fetchLogs();
+          return { success: true, message: res.data.message, movements: res.data.movements };
+        } else {
+          return { success: false, message: res.data.message };
+        }
+      }
+    } catch (err) {
+      console.warn('Server offline, completing batch delivery order locally');
+    }
+
+    // OFFLINE FALLBACK FOR BATCH
+    const createdMovements: StockMovement[] = [];
+    let updatedProducts = [...products];
+
+    // Pre-check stock
+    for (const itm of batchData.items) {
+      const p = updatedProducts.find(prod => prod.id === itm.productId);
+      if (!p) return { success: false, message: 'صنف غير موجود' };
+      if (p.stock < itm.quantity) {
+        return { success: false, message: `الرصيد المتاح من (${p.name}) هو ${p.stock} فقط، ولا يكفي لصرف ${itm.quantity}` };
+      }
+    }
+
+    // Deduct & create logs
+    for (const itm of batchData.items) {
+      const pIndex = updatedProducts.findIndex(prod => prod.id === itm.productId);
+      const prod = updatedProducts[pIndex];
+      const prevStock = prod.stock;
+      const newStock = Math.max(0, prevStock - itm.quantity);
+      updatedProducts[pIndex] = { ...prod, stock: newStock };
+
+      const mov: StockMovement = {
+        id: 'mvt_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        productId: prod.id,
+        productCode: prod.code,
+        productName: prod.name,
+        type: 'OUT',
+        quantity: itm.quantity,
+        previousStock: prevStock,
+        newStock: newStock,
+        reason: batchData.reason,
+        referenceNo: batchData.referenceNo,
+        operatorName: currentUser?.name || 'أمين المخزن',
+        timestamp: new Date().toISOString(),
+      };
+      createdMovements.push(mov);
+    }
+
+    setProducts(updatedProducts);
+    localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updatedProducts));
+
+    setMovements(prev => {
+      const updated = [...createdMovements, ...prev];
+      localStorage.setItem('nasser_warehouse_movements_v1', JSON.stringify(updated));
+      return updated;
+    });
+
+    return { success: true, message: 'تم صرف أمر التسليم محلياً بنجاح', movements: createdMovements };
+  };
+
   // Add Product
   const handleAddProduct = async (productData: Partial<Product>) => {
     try {
@@ -841,6 +922,7 @@ export default function App() {
               onUpdateProduct={handleUpdateProduct}
               onDeleteProduct={handleDeleteProduct}
               onStockMovement={handleStockMovement}
+              onBatchStockMovement={handleBatchStockMovement}
               onBack={handleGoBack}
             />
           )}
@@ -865,7 +947,7 @@ export default function App() {
 
         {/* Footer Bar */}
         <footer className="h-9 bg-slate-100 border-t border-slate-200 px-6 sm:px-8 flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-widest no-print mt-auto">
-          <div>الموقع: الخرطوم - شارع الستين الرئيسي | قسم إدارة المخازن</div>
+          <div>الموقع: أمدرمان | قسم إدارة المخازن</div>
           <div className="flex gap-6 items-center">
             <span>تحديث أوفلاين تلقائي</span>
             <span className="text-emerald-600 font-extrabold flex items-center gap-1">
