@@ -140,12 +140,12 @@ jobs:
             Get-ChildItem -Path py_build_portable -Recurse | ForEach-Object { $_.FullName }
           }
 
-      # 11. رفع برنامج التثبيت النهائي (Nasser_Company_Setup.exe)
+      # 11. رفع برنامج التثبيت النهائي (Nasser_Company_Setup)
       - name: Upload Windows Installer (.exe Setup)
         uses: actions/upload-artifact@v4
         with:
           name: NASSER_Company_Windows_Installer
-          path: installer_output/Nasser_Company_Setup.exe
+          path: installer_output/*.exe
           if-no-files-found: error
 
       # 12. رفع النسخة المحمولة المستقلة (Portable Single .exe)
@@ -153,5 +153,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: NASSER_Company_Portable_Executable
-          path: py_build_portable/NASSER_Company_App_Portable.exe
+          path: py_build_portable/*.exe
           if-no-files-found: error
