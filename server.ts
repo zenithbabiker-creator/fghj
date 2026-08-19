@@ -665,20 +665,25 @@ app.delete('/api/products/:id', (req, res) => {
 // Helper for resilient product lookup (by ID, exact code, trimmed case-insensitive, or space/dash-free code)
 function findProductInList(products: Product[], idOrCode: string): Product | undefined {
   if (!idOrCode) return undefined;
-  const cleanKey = String(idOrCode).trim();
-  const lowerKey = cleanKey.toLowerCase();
-  const denseKey = lowerKey.replace(/[\s\-_/.]/g, '');
+  try {
+    const cleanKey = String(idOrCode).trim();
+    const lowerKey = cleanKey.toLowerCase();
+    const denseKey = lowerKey.replace(/[\s_./\\-]/g, '');
 
-  return products.find(p => {
-    if (p.id === cleanKey || p.code === cleanKey) return true;
-    if (p.id.toLowerCase() === lowerKey || p.code.toLowerCase() === lowerKey) return true;
-    if (denseKey.length > 0) {
-      const pDenseCode = p.code.toLowerCase().replace(/[\s\-_/.]/g, '');
-      const pDenseId = p.id.toLowerCase().replace(/[\s\-_/.]/g, '');
-      if (pDenseCode === denseKey || pDenseId === denseKey) return true;
-    }
-    return false;
-  });
+    return products.find(p => {
+      if (p.id === cleanKey || p.code === cleanKey) return true;
+      if (p.id.toLowerCase() === lowerKey || p.code.toLowerCase() === lowerKey) return true;
+      if (denseKey.length > 0) {
+        const pDenseCode = p.code.toLowerCase().replace(/[\s_./\\-]/g, '');
+        const pDenseId = p.id.toLowerCase().replace(/[\s_./\\-]/g, '');
+        if (pDenseCode === denseKey || pDenseId === denseKey) return true;
+      }
+      return false;
+    });
+  } catch (err) {
+    const fallbackKey = String(idOrCode).trim();
+    return products.find(p => p.id === fallbackKey || p.code === fallbackKey);
+  }
 }
 
 // STOCK MOVEMENTS - Process In / Out / Adjustment

@@ -352,30 +352,43 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             print("JSON parse error:", e)
         return {}
 
+    def _clean_dense(self, text):
+        """Safely normalize and strip whitespace, hyphens, underscores and punctuation without fragile regex"""
+        if not text:
+            return ""
+        try:
+            ignore_chars = (' ', '-', '_', '.', '/', chr(92))
+            return ''.join(c for c in str(text).lower().strip() if c not in ignore_chars)
+        except Exception:
+            return str(text).lower().strip()
+
     def _find_product(self, cursor, p_id):
         """Universal resilient product lookup supporting ID, exact code, case-insensitive, and space/dash-free code"""
         if not p_id:
             return None
-        p_id_str = str(p_id).strip()
-        # 1. Exact match on id or code
-        cursor.execute("SELECT id, code, name, stock FROM products WHERE id=? OR code=?", (p_id_str, p_id_str))
-        row = cursor.fetchone()
-        if row:
-            return row
-        # 2. Case-insensitive trimmed match
-        cursor.execute("SELECT id, code, name, stock FROM products WHERE LOWER(TRIM(code))=LOWER(TRIM(?)) OR LOWER(TRIM(id))=LOWER(TRIM(?))", (p_id_str, p_id_str))
-        row = cursor.fetchone()
-        if row:
-            return row
-        # 3. Dense alphanumeric match (ignoring spaces, hyphens, underscores)
-        dense_target = re.sub(r'[\s\-_/.]', '', p_id_str).lower()
-        if dense_target:
-            cursor.execute("SELECT id, code, name, stock FROM products")
-            for prod_row in cursor.fetchall():
-                p_code_dense = re.sub(r'[\s\-_/.]', '', str(prod_row[1])).lower()
-                p_id_dense = re.sub(r'[\s\-_/.]', '', str(prod_row[0])).lower()
-                if p_code_dense == dense_target or p_id_dense == dense_target:
-                    return prod_row
+        try:
+            p_id_str = str(p_id).strip()
+            # 1. Exact match on id or code
+            cursor.execute("SELECT id, code, name, stock FROM products WHERE id=? OR code=?", (p_id_str, p_id_str))
+            row = cursor.fetchone()
+            if row:
+                return row
+            # 2. Case-insensitive trimmed match
+            cursor.execute("SELECT id, code, name, stock FROM products WHERE LOWER(TRIM(code))=LOWER(TRIM(?)) OR LOWER(TRIM(id))=LOWER(TRIM(?))", (p_id_str, p_id_str))
+            row = cursor.fetchone()
+            if row:
+                return row
+            # 3. Dense alphanumeric match (ignoring spaces, hyphens, underscores)
+            dense_target = self._clean_dense(p_id_str)
+            if dense_target:
+                cursor.execute("SELECT id, code, name, stock FROM products")
+                for prod_row in cursor.fetchall():
+                    p_code_dense = self._clean_dense(prod_row[1])
+                    p_id_dense = self._clean_dense(prod_row[0])
+                    if p_code_dense == dense_target or p_id_dense == dense_target:
+                        return prod_row
+        except Exception as e:
+            print("Product lookup error:", e)
         return None
 
     def do_OPTIONS(self):
@@ -656,7 +669,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             all_codes = cursor.fetchall()
                             max_num = 100
                             for c in all_codes:
-                                m = re.findall(r'\d+', str(c[0]))
+                                m = re.findall(r'\\d+', str(c[0]))
                                 if m:
                                     max_num = max(max_num, int(m[-1]))
                             code = f"NASSER-{max_num + 1}"
@@ -714,7 +727,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         all_codes = cursor.fetchall()
                         max_num = 1000
                         for c in all_codes:
-                            m = re.findall(r'\d+', str(c[0]))
+                            m = re.findall(r'\\d+', str(c[0]))
                             if m:
                                 max_num = max(max_num, int(m[-1]))
 
