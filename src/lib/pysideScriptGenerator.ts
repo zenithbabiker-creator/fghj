@@ -390,7 +390,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         return {}
 
     def _clean_dense(self, text):
-        """Safely normalize and strip whitespace, hyphens, underscores and punctuation without fragile regex"""
+        """Safely normalize and strip whitespace, hyphens, underscores and punctuation"""
         if not text:
             return ""
         try:
@@ -399,31 +399,63 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             return str(text).lower().strip()
 
-    def _find_product(self, cursor, p_id):
-        """Universal resilient product lookup supporting ID, exact code, case-insensitive, and space/dash-free code"""
-        if not p_id:
+    def _find_product(self, cursor, p_id_or_obj):
+        """Universal resilient product lookup supporting dicts, ID, Code, Name, case-insensitivity, and numeric extraction"""
+        if not p_id_or_obj:
             return None
         try:
-            p_id_str = str(p_id).strip()
-            # 1. Exact match on id or code
-            cursor.execute("SELECT id, code, name, stock FROM products WHERE id=? OR code=?", (p_id_str, p_id_str))
-            row = cursor.fetchone()
-            if row:
-                return row
-            # 2. Case-insensitive trimmed match
-            cursor.execute("SELECT id, code, name, stock FROM products WHERE LOWER(TRIM(code))=LOWER(TRIM(?)) OR LOWER(TRIM(id))=LOWER(TRIM(?))", (p_id_str, p_id_str))
-            row = cursor.fetchone()
-            if row:
-                return row
-            # 3. Dense alphanumeric match (ignoring spaces, hyphens, underscores)
-            dense_target = self._clean_dense(p_id_str)
-            if dense_target:
-                cursor.execute("SELECT id, code, name, stock FROM products")
-                for prod_row in cursor.fetchall():
-                    p_code_dense = self._clean_dense(prod_row[1])
-                    p_id_dense = self._clean_dense(prod_row[0])
-                    if p_code_dense == dense_target or p_id_dense == dense_target:
-                        return prod_row
+            candidate_keys = []
+            if isinstance(p_id_or_obj, dict):
+                for k in ['productId', 'id', 'productCode', 'code', 'productName', 'name']:
+                    val = p_id_or_obj.get(k)
+                    if val is not None:
+                        s_val = str(val).strip()
+                        if s_val and s_val.lower() not in ('none', 'null', 'undefined', ''):
+                            candidate_keys.append(s_val)
+            else:
+                s_val = str(p_id_or_obj).strip()
+                if s_val and s_val.lower() not in ('none', 'null', 'undefined', ''):
+                    candidate_keys.append(s_val)
+
+            if not candidate_keys:
+                return None
+
+            for target in candidate_keys:
+                # 1. Exact match on id or code or name
+                cursor.execute("SELECT id, code, name, stock, category, min_stock, unit, description, updated_at FROM products WHERE id=? OR code=? OR name=?", (target, target, target))
+                row = cursor.fetchone()
+                if row:
+                    return row
+
+                # 2. Case-insensitive trimmed match
+                cursor.execute("SELECT id, code, name, stock, category, min_stock, unit, description, updated_at FROM products WHERE LOWER(TRIM(code))=LOWER(TRIM(?)) OR LOWER(TRIM(id))=LOWER(TRIM(?)) OR LOWER(TRIM(name))=LOWER(TRIM(?))", (target, target, target))
+                row = cursor.fetchone()
+                if row:
+                    return row
+
+                # 3. Dense alphanumeric match (ignoring spaces, hyphens, underscores)
+                dense_target = self._clean_dense(target)
+                if dense_target:
+                    cursor.execute("SELECT id, code, name, stock, category, min_stock, unit, description, updated_at FROM products")
+                    all_rows = cursor.fetchall()
+                    for prod_row in all_rows:
+                        p_code_dense = self._clean_dense(prod_row[1])
+                        p_id_dense = self._clean_dense(prod_row[0])
+                        p_name_dense = self._clean_dense(prod_row[2])
+                        if dense_target in (p_code_dense, p_id_dense, p_name_dense):
+                            return prod_row
+
+                    # 4. Numeric code extraction (e.g. '101' matches 'NASSER-101')
+                    digits = re.findall(r'\d+', target)
+                    if digits:
+                        last_num = digits[-1]
+                        for prod_row in all_rows:
+                            c_digits = re.findall(r'\d+', str(prod_row[1]))
+                            if c_digits and c_digits[-1] == last_num:
+                                return prod_row
+                            id_digits = re.findall(r'\d+', str(prod_row[0]))
+                            if id_digits and id_digits[-1] == last_num:
+                                return prod_row
         except Exception as e:
             print("Product lookup error:", e)
         return None
@@ -818,7 +850,6 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if parsed_path == '/api/movements':
             try:
                 data = self._read_json_body()
-                p_id = str(data.get('productId', '')).strip()
                 m_type = data.get('type', 'OUT')
                 ref_no = data.get('referenceNo', '')
                 reason_str = data.get('reason', '')
@@ -836,9 +867,9 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                     try:
                         cursor = conn.cursor()
 
-                        p_row = self._find_product(cursor, p_id)
+                        p_row = self._find_product(cursor, data)
                         
-                        actual_id = p_id
+                        actual_id = str(data.get('productId') or data.get('id') or '')
                         p_code = ""
                         p_name = "صنف مخزني"
                         previous_stock = 0
@@ -912,27 +943,26 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                         # مرحلة التحقق أولاً: التأكد من توفر الرصيد لجميع الأصناف
                         for idx, itm in enumerate(items):
-                            p_id = str(itm.get('productId', '')).strip()
                             try:
                                 qty = max(1, int(itm.get('quantity', 1)))
                             except Exception:
                                 qty = 1
                             
-                            p_row = self._find_product(cursor, p_id)
+                            p_row = self._find_product(cursor, itm)
                             if not p_row:
-                                return self._send_json({"success": False, "message": f"الصنف ذو المعرف أو الكود ({p_id}) غير موجود بالمخزن"}, 404)
+                                d_name = itm.get('productName') or itm.get('name') or itm.get('productCode') or itm.get('code') or itm.get('productId') or 'الصنف المطلوب'
+                                return self._send_json({"success": False, "message": f"الصنف ({d_name}) غير موجود بالمخزن"}, 404)
                             if int(p_row[3]) < qty:
                                 return self._send_json({"success": False, "message": f"الرصيد المتاح من ({p_row[2]}) هو {p_row[3]} فقط، ولا يكفي لصرف كمية {qty}"}, 400)
 
                         # مرحلة التنفيذ الذري: خصم الكميات وتسجيل الحركات دفعة واحدة
                         for idx, itm in enumerate(items):
-                            p_id = str(itm.get('productId', '')).strip()
                             try:
                                 qty = max(1, int(itm.get('quantity', 1)))
                             except Exception:
                                 qty = 1
 
-                            p_row = self._find_product(cursor, p_id)
+                            p_row = self._find_product(cursor, itm)
                             actual_id, p_code, p_name, prev_stock = p_row[0], p_row[1], p_row[2], int(p_row[3])
                             new_stock = max(0, prev_stock - qty)
 

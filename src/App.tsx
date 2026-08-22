@@ -213,7 +213,24 @@ export default function App() {
     setCurrentUser(null);
   };
 
-  // Stock Movement Action Handler (IN / OUT / ADJUSTMENT)
+  // Helper for offline product finding in App.tsx
+  const findProductLocal = (prods: Product[], idOrKey: any): Product | undefined => {
+    if (!idOrKey) return undefined;
+    if (typeof idOrKey === 'object' && idOrKey !== null) {
+      for (const k of ['productId', 'id', 'productCode', 'code', 'productName', 'name']) {
+        const val = idOrKey[k];
+        if (val && typeof val === 'string' && !['none', 'null', 'undefined', ''].includes(val.trim().toLowerCase())) {
+          const found = prods.find(p => p.id === val.trim() || p.code === val.trim() || p.name === val.trim());
+          if (found) return found;
+        }
+      }
+    }
+    const s = String(idOrKey).trim();
+    if (!s || ['none', 'null', 'undefined', ''].includes(s.toLowerCase())) return undefined;
+    return prods.find(p => p.id === s || p.code === s || p.name === s || p.id.toLowerCase() === s.toLowerCase() || p.code.toLowerCase() === s.toLowerCase());
+  };
+
+  // Stock Movement Handler
   const handleStockMovement = async (movementData: {
     productId: string;
     type: 'IN' | 'OUT' | 'ADJUSTMENT';
@@ -242,12 +259,11 @@ export default function App() {
           return { success: false, message: res.data.message };
         }
       }
-    } catch (err) {
-      console.warn('Server offline, completing stock movement locally');
+    } catch (e) {
+      console.warn('Logging movement locally');
     }
 
-    // OFFLINE FALLBACK
-    const targetProduct = products.find(p => p.id === movementData.productId);
+    const targetProduct = findProductLocal(products, movementData.productId);
     if (!targetProduct) return { success: false, message: 'الصنف غير موجود' };
 
     const previousStock = targetProduct.stock;
@@ -285,13 +301,13 @@ export default function App() {
 
     setProducts(prev => {
       const updated = prev.map(p => (p.id === targetProduct.id ? { ...p, stock: newStock } : p));
-      localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updated));
       return updated;
     });
 
     setMovements(prev => {
       const updated = [newMovement, ...prev];
-      localStorage.setItem('nasser_warehouse_movements_v1', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_movements_v2', JSON.stringify(updated));
       return updated;
     });
 
@@ -300,7 +316,7 @@ export default function App() {
 
   // Batch Stock Movements Handler (Delivery Orders - Atomic Execution)
   const handleBatchStockMovement = async (batchData: {
-    items: Array<{ productId: string; quantity: number }>;
+    items: Array<{ productId: string; quantity: number; productCode?: string; productName?: string }>;
     reason: string;
     referenceNo: string;
   }) => {
@@ -335,8 +351,11 @@ export default function App() {
 
     // Pre-check stock
     for (const itm of batchData.items) {
-      const p = updatedProducts.find(prod => prod.id === itm.productId);
-      if (!p) return { success: false, message: 'صنف غير موجود' };
+      const p = findProductLocal(updatedProducts, itm);
+      if (!p) {
+        const label = itm.productName || itm.productCode || itm.productId || 'الصنف المطلوب';
+        return { success: false, message: `الصنف (${label}) غير موجود بالمخزن` };
+      }
       if (p.stock < itm.quantity) {
         return { success: false, message: `الرصيد المتاح من (${p.name}) هو ${p.stock} فقط، ولا يكفي لصرف ${itm.quantity}` };
       }
@@ -344,8 +363,8 @@ export default function App() {
 
     // Deduct & create logs
     for (const itm of batchData.items) {
-      const pIndex = updatedProducts.findIndex(prod => prod.id === itm.productId);
-      const prod = updatedProducts[pIndex];
+      const prod = findProductLocal(updatedProducts, itm)!;
+      const pIndex = updatedProducts.findIndex(p => p.id === prod.id);
       const prevStock = prod.stock;
       const newStock = Math.max(0, prevStock - itm.quantity);
       updatedProducts[pIndex] = { ...prod, stock: newStock };
@@ -368,11 +387,11 @@ export default function App() {
     }
 
     setProducts(updatedProducts);
-    localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updatedProducts));
+    localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updatedProducts));
 
     setMovements(prev => {
       const updated = [...createdMovements, ...prev];
-      localStorage.setItem('nasser_warehouse_movements_v1', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_movements_v2', JSON.stringify(updated));
       return updated;
     });
 
@@ -406,9 +425,18 @@ export default function App() {
       console.warn('Adding product locally');
     }
 
+    let maxNum = 100;
+    products.forEach(p => {
+      const matches = p.code.match(/\d+/g);
+      if (matches) {
+        const num = parseInt(matches[matches.length - 1], 10);
+        if (!isNaN(num) && num > maxNum) maxNum = num;
+      }
+    });
+
     const newProd: Product = {
-      id: 'prd_' + Date.now(),
-      code: productData.code || 'NASSER-' + (products.length + 101),
+      id: productData.id || 'prd_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      code: (productData.code && productData.code.trim()) ? productData.code.trim() : 'NASSER-' + (maxNum + 1),
       name: productData.name || 'صنف جديد',
       category: productData.category || 'عام',
       stock: Number(productData.stock) || 0,
@@ -420,7 +448,7 @@ export default function App() {
 
     setProducts(prev => {
       const updated = [newProd, ...prev];
-      localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updated));
       return updated;
     });
 
@@ -451,11 +479,11 @@ export default function App() {
     }
 
     // Local fallback
-    let maxNum = 1000;
+    let maxNum = 100;
     products.forEach(p => {
-      const match = p.code.match(/\d+/);
+      const match = p.code.match(/\d+/g);
       if (match) {
-        const num = parseInt(match[0], 10);
+        const num = parseInt(match[match.length - 1], 10);
         if (!isNaN(num) && num > maxNum) maxNum = num;
       }
     });
@@ -470,7 +498,7 @@ export default function App() {
       const stockVal = Math.max(0, Number(item.stock) || 0);
 
       newProds.push({
-        id: `prd_${Date.now()}_${index}`,
+        id: `prd_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 6)}`,
         code: finalCode,
         name: item.name.trim(),
         category: item.category || 'عام',
@@ -484,7 +512,7 @@ export default function App() {
 
     setProducts(prev => {
       const updated = [...newProds, ...prev];
-      localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updated));
+      localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updated));
       return updated;
     });
 
@@ -519,8 +547,10 @@ export default function App() {
     }
 
     setProducts(prev => {
-      const updated = prev.map(p => (p.id === id ? { ...p, ...productData } : p));
-      localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updated));
+      const target = findProductLocal(prev, id);
+      const targetId = target ? target.id : id;
+      const updated = prev.map(p => (p.id === targetId ? { ...p, ...productData, updatedAt: new Date().toISOString() } : p));
+      localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updated));
       return updated;
     });
 
@@ -548,8 +578,10 @@ export default function App() {
     }
 
     setProducts(prev => {
-      const updated = prev.filter(p => p.id !== id);
-      localStorage.setItem('nasser_warehouse_products_v3', JSON.stringify(updated));
+      const target = findProductLocal(prev, id);
+      const targetId = target ? target.id : id;
+      const updated = prev.filter(p => p.id !== targetId && p.code !== id);
+      localStorage.setItem('nasser_warehouse_products_v4', JSON.stringify(updated));
       return updated;
     });
 

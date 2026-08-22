@@ -442,7 +442,7 @@ app.get('/api/products', (req, res) => {
 
 // PRODUCTS - Create Product
 app.post('/api/products', (req, res) => {
-  const { code, name, category, stock, minStock, unit, description, username, role } = req.body;
+  const { id: customId, code, name, category, stock, minStock, unit, description, username, role } = req.body;
 
   if (role !== 'GENERAL_MANAGER') {
     return res.status(403).json({ success: false, message: 'عفواً، إضافة صنف جديد هي صلاحية حصرية للمدير العام (الحساب الرئيسي) فقط' });
@@ -452,7 +452,7 @@ app.post('/api/products', (req, res) => {
   
   let productCode = (code || '').trim();
   if (!productCode) {
-    let maxNum = 0;
+    let maxNum = 100;
     let prefix = 'NASSER-';
     db.products.forEach(p => {
       const match = p.code.match(/^(.*?)(\d+)$/);
@@ -460,17 +460,34 @@ app.post('/api/products', (req, res) => {
         if (match[1]) prefix = match[1];
         const num = parseInt(match[2], 10);
         if (!isNaN(num) && num > maxNum) maxNum = num;
+      } else {
+        const anyNum = p.code.match(/\d+/g);
+        if (anyNum) {
+          const num = parseInt(anyNum[anyNum.length - 1], 10);
+          if (!isNaN(num) && num > maxNum) maxNum = num;
+        }
       }
     });
-    productCode = `${prefix}${maxNum > 0 ? maxNum + 1 : db.products.length + 101}`;
+    productCode = `${prefix}${maxNum + 1}`;
+  }
+
+  // Ensure unique code
+  let finalCode = productCode;
+  let collisionCounter = 1;
+  while (db.products.some(p => p.code.toLowerCase() === finalCode.toLowerCase())) {
+    finalCode = `${productCode}-${collisionCounter}`;
+    collisionCounter++;
   }
 
   const initialStock = Math.max(0, Number(stock) || 0);
+  const pId = customId && typeof customId === 'string' && customId.trim().length > 0 && !['none', 'null', 'undefined'].includes(customId.toLowerCase())
+    ? customId.trim()
+    : `prd_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
   const newProduct: Product = {
-    id: `prd_${Date.now()}`,
-    code: productCode,
-    name: name.trim(),
+    id: pId,
+    code: finalCode,
+    name: (name || 'صنف جديد').trim(),
     category: category || 'عام',
     stock: initialStock,
     minStock: Number(minStock) || 5,
@@ -479,12 +496,12 @@ app.post('/api/products', (req, res) => {
     updatedAt: new Date().toISOString(),
   };
 
-  db.products.push(newProduct);
+  db.products.unshift(newProduct);
 
   // Record initial stock movement if initialStock > 0
   if (initialStock > 0) {
     const movement: StockMovement = {
-      id: `mvt_${Date.now()}`,
+      id: `mvt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       productId: newProduct.id,
       productCode: newProduct.code,
       productName: newProduct.name,
@@ -602,7 +619,12 @@ app.put('/api/products/:id', (req, res) => {
   }
 
   const db = readDB();
-  const index = db.products.findIndex(p => p.id === id);
+  const targetProd = findProductInList(db.products, id);
+  if (!targetProd) {
+    return res.status(404).json({ success: false, message: 'الصنف غير موجود' });
+  }
+
+  const index = db.products.findIndex(p => p.id === targetProd.id);
   if (index === -1) {
     return res.status(404).json({ success: false, message: 'الصنف غير موجود' });
   }
@@ -615,7 +637,7 @@ app.put('/api/products/:id', (req, res) => {
   if (!isNaN(newStock) && newStock !== oldProd.stock) {
     const diff = newStock - oldProd.stock;
     const movement: StockMovement = {
-      id: `mvt_${Date.now()}`,
+      id: `mvt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       productId: oldProd.id,
       productCode: code || oldProd.code,
       productName: name || oldProd.name,
@@ -665,41 +687,86 @@ app.delete('/api/products/:id', (req, res) => {
   }
 
   const db = readDB();
-  const product = db.products.find(p => p.id === id);
-  if (!product) {
+  const targetProd = findProductInList(db.products, id);
+  if (!targetProd) {
     return res.status(404).json({ success: false, message: 'الصنف غير موجود' });
   }
 
-  db.products = db.products.filter(p => p.id !== id);
+  db.products = db.products.filter(p => p.id !== targetProd.id && p.code !== targetProd.code);
   writeDB(db);
 
-  addAuditLog(String(username || 'المدير العام'), String(role || 'GENERAL_MANAGER'), 'حذف صنف من المخزن', `تم حذف الصنف (${product.name}) بكود [${product.code}] نهائياً`, 'WARNING');
+  addAuditLog(String(username || 'المدير العام'), String(role || 'GENERAL_MANAGER'), 'حذف صنف من المخزن', `تم حذف الصنف (${targetProd.name}) بكود [${targetProd.code}] نهائياً`, 'WARNING');
 
   res.json({ success: true, message: 'تم حذف الصنف من قاعدة البيانات بنجاح' });
 });
 
-// Helper for resilient product lookup (by ID, exact code, trimmed case-insensitive, or space/dash-free code)
-function findProductInList(products: Product[], idOrCode: string): Product | undefined {
-  if (!idOrCode) return undefined;
+// Helper for resilient product lookup (by ID, exact code, trimmed case-insensitive, number extraction, or space/dash-free code)
+function findProductInList(products: Product[], idOrKey: any): Product | undefined {
+  if (!idOrKey) return undefined;
   try {
-    const cleanKey = String(idOrCode).trim();
-    const lowerKey = cleanKey.toLowerCase();
-    const denseKey = lowerKey.replace(/[\s_./\\-]/g, '');
-
-    return products.find(p => {
-      if (p.id === cleanKey || p.code === cleanKey) return true;
-      if (p.id.toLowerCase() === lowerKey || p.code.toLowerCase() === lowerKey) return true;
-      if (denseKey.length > 0) {
-        const pDenseCode = p.code.toLowerCase().replace(/[\s_./\\-]/g, '');
-        const pDenseId = p.id.toLowerCase().replace(/[\s_./\\-]/g, '');
-        if (pDenseCode === denseKey || pDenseId === denseKey) return true;
+    const candidateKeys: string[] = [];
+    if (typeof idOrKey === 'object' && idOrKey !== null) {
+      for (const k of ['productId', 'id', 'productCode', 'code', 'productName', 'name']) {
+        const val = idOrKey[k];
+        if (val && typeof val === 'string' && !['none', 'null', 'undefined', ''].includes(val.trim().toLowerCase())) {
+          candidateKeys.push(val.trim());
+        }
       }
-      return false;
-    });
+    } else {
+      const s = String(idOrKey).trim();
+      if (s && !['none', 'null', 'undefined', ''].includes(s.toLowerCase())) {
+        candidateKeys.push(s);
+      }
+    }
+
+    if (candidateKeys.length === 0) return undefined;
+
+    for (const target of candidateKeys) {
+      const lowerTarget = target.toLowerCase();
+      const denseTarget = lowerTarget.replace(/[\s_./\\-]/g, '');
+      const numMatches = target.match(/\d+/g);
+      const targetLastNum = numMatches ? numMatches[numMatches.length - 1] : null;
+
+      // 1. Exact ID or Code or Name match
+      const exact = products.find(p => p.id === target || p.code === target || p.name === target);
+      if (exact) return exact;
+
+      // 2. Case-insensitive match
+      const caseMatch = products.find(p =>
+        p.id.toLowerCase() === lowerTarget ||
+        p.code.toLowerCase() === lowerTarget ||
+        p.name.toLowerCase() === lowerTarget
+      );
+      if (caseMatch) return caseMatch;
+
+      // 3. Dense match (ignoring dashes, spaces, underscores)
+      if (denseTarget.length > 0) {
+        const denseMatch = products.find(p => {
+          const pDenseCode = p.code.toLowerCase().replace(/[\s_./\\-]/g, '');
+          const pDenseId = p.id.toLowerCase().replace(/[\s_./\\-]/g, '');
+          const pDenseName = p.name.toLowerCase().replace(/[\s_./\\-]/g, '');
+          return pDenseCode === denseTarget || pDenseId === denseTarget || pDenseName === denseTarget;
+        });
+        if (denseMatch) return denseMatch;
+      }
+
+      // 4. Numeric code match (e.g. '101' matches 'NASSER-101')
+      if (targetLastNum) {
+        const numMatch = products.find(p => {
+          const pNums = p.code.match(/\d+/g);
+          if (pNums && pNums[pNums.length - 1] === targetLastNum) return true;
+          const idNums = p.id.match(/\d+/g);
+          if (idNums && idNums[idNums.length - 1] === targetLastNum) return true;
+          return false;
+        });
+        if (numMatch) return numMatch;
+      }
+    }
   } catch (err) {
-    const fallbackKey = String(idOrCode).trim();
+    const fallbackKey = String(idOrKey).trim();
     return products.find(p => p.id === fallbackKey || p.code === fallbackKey);
   }
+  return undefined;
 }
 
 // STOCK MOVEMENTS - Process In / Out / Adjustment
@@ -712,7 +779,7 @@ app.post('/api/movements', (req, res) => {
   }
 
   const db = readDB();
-  const product = findProductInList(db.products, productId);
+  const product = findProductInList(db.products, req.body);
   if (!product) {
     return res.status(404).json({ success: false, message: 'الصنف غير موجود بالمخزن' });
   }
@@ -810,11 +877,11 @@ app.post('/api/movements/batch', (req, res) => {
 
   // 1. Validation phase: check that all items exist and have sufficient stock
   for (const itm of items) {
-    const pId = itm.productId;
     const qty = Number(itm.quantity) || 1;
-    const prod = findProductInList(db.products, pId);
+    const prod = findProductInList(db.products, itm);
     if (!prod) {
-      return res.status(404).json({ success: false, message: `الصنف ذو المعرف أو الكود (${pId}) غير موجود بالمخزن` });
+      const displayLabel = itm.productName || itm.name || itm.productCode || itm.code || itm.productId || 'الصنف المطلوب';
+      return res.status(404).json({ success: false, message: `الصنف (${displayLabel}) غير موجود بالمخزن` });
     }
     if (prod.stock < qty) {
       return res.status(400).json({
@@ -827,9 +894,8 @@ app.post('/api/movements/batch', (req, res) => {
   // 2. Execution phase: deduct stock and record movements
   const createdMovements: StockMovement[] = [];
   for (const itm of items) {
-    const pId = itm.productId;
     const qty = Number(itm.quantity) || 1;
-    const prod = findProductInList(db.products, pId)!;
+    const prod = findProductInList(db.products, itm)!;
     const previousStock = prod.stock;
     const newStock = Math.max(0, previousStock - qty);
 
