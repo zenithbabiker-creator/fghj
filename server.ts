@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { DEFAULT_CATALOG_PRODUCTS } from './src/data/defaultCatalog';
 
 const app = express();
 const PORT = 3000;
@@ -62,6 +63,7 @@ interface AuditLog {
 }
 
 interface DBData {
+  catalogVersion?: string;
   users: User[];
   products: Product[];
   movements: StockMovement[];
@@ -86,6 +88,7 @@ const activeOtps: Record<string, { code: string; expiresAt: number; gmail: strin
 
 // Default Initial Seed Data
 const DEFAULT_DB: DBData = {
+  catalogVersion: 'CATALOG_V4_2026_08_NEW_SEED',
   users: [
     {
       id: 'usr_1',
@@ -106,75 +109,20 @@ const DEFAULT_DB: DBData = {
       createdAt: new Date().toISOString(),
     },
   ],
-  products: [
-    {
-      id: 'prd_1',
-      code: 'NASSER-101',
-      name: 'ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3',
-      category: 'أجهزة ومعدات',
-      stock: 45,
-      minStock: 5,
-      unit: 'وحدة',
-      description: '',
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prd_2',
-      code: 'NASSER-102',
-      name: 'طاحونة حبوب القهوة الصناعية 1500W دقيقة التنعيم',
-      category: 'أجهزة ومعدات',
-      stock: 22,
-      minStock: 5,
-      unit: 'وحدة',
-      description: '',
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prd_3',
-      code: 'NASSER-103',
-      name: 'طابعة فواتير حرارية عالية السرعة 80mm USB/LAN',
-      category: 'إلكترونيات ومعدات',
-      stock: 18,
-      minStock: 5,
-      unit: 'وحدة',
-      description: '',
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prd_4',
-      code: 'NASSER-104',
-      name: 'ميزان إلكتروني ديجيتال دقيق للوزن والجرعات 0.1g',
-      category: 'أجهزة قياس',
-      stock: 4,
-      minStock: 5,
-      unit: 'وحدة',
-      description: '',
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prd_5',
-      code: 'NASSER-105',
-      name: 'فلتر تنقية وتقطير المياه خماسي المراحل للمقاهي',
-      category: 'مستلزمات ومستهلكات',
-      stock: 60,
-      minStock: 5,
-      unit: 'وحدة',
-      description: '',
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'prd_6',
-      code: 'NASSER-106',
-      name: 'مقبض ضغط القهوة اليدوي (Tamper) استانلس ستيل 58mm',
-      category: 'ملحقات ومستلزمات',
-      stock: 85,
-      minStock: 5,
-      unit: 'وحدة',
-      description: '',
-      updatedAt: new Date().toISOString(),
-    }
-  ],
-  movements: [],
+  products: DEFAULT_CATALOG_PRODUCTS,
+  movements: DEFAULT_CATALOG_PRODUCTS.map((p, idx) => ({
+    id: `mvt_init_${p.id}`,
+    productId: p.id,
+    productCode: p.code,
+    productName: p.name,
+    type: 'IN' as const,
+    quantity: p.stock,
+    previousStock: 0,
+    newStock: p.stock,
+    reason: `رصيد افتتاحي معتمد في قسم (${p.category})`,
+    operatorName: 'المدير العام',
+    timestamp: p.updatedAt,
+  })),
   logs: [
     {
       id: 'log_1',
@@ -182,7 +130,7 @@ const DEFAULT_DB: DBData = {
       username: 'النظام',
       role: 'GENERAL_MANAGER',
       action: 'تشغيل النظام',
-      details: 'تم بدء تشغيل قاعدة بيانات إدارة المخازن والمخزون لشركة NASSER بنجاح',
+      details: 'تم بدء تشغيل وتحديث قاعدة بيانات إدارة المخازن والمخزون لشركة NASSER وفق القائمة الجديدة المعتمدة',
       type: 'INFO',
     },
   ],
@@ -209,6 +157,74 @@ function readDB(): DBData {
     const db: DBData = JSON.parse(content);
 
     if (!db.movements) db.movements = [];
+
+    // Migration Check: If catalogVersion is not the new seed or old coffee/network items are present, drop old seed and migrate cleanly
+    const hasOldSeed = db.products.some(p => 
+      p.name.includes('إسبيرسو') || 
+      p.name.includes('Cat6') || 
+      p.name.includes('سيسكو') ||
+      p.name.includes('طاحونة حبوب')
+    );
+
+    if (db.catalogVersion !== 'CATALOG_V4_2026_08_NEW_SEED' || hasOldSeed || db.products.length === 0) {
+      console.log('🔄 Migrating Database: Replacing old seed data with the new verified 82-item catalog...');
+      
+      // Preserve any genuinely custom items added by user (items that were not in old default list)
+      const oldDefaultNames = new Set([
+        'ماكينة إعداد القهوة الإسبيرسو الاحترافية NASSER Pro 3',
+        'طاحونة حبوب القهوة الصناعية 1500W دقيقة التنعيم',
+        'طابعة فواتير حرارية عالية السرعة 80mm USB/LAN',
+        'ميزان إلكتروني ديجيتال دقيق للوزن والجرعات 0.1g',
+        'فلتر تنقية وتقطير المياه خماسي المراحل للمقاهي',
+        'مقبض ضغط القهوة اليدوي (Tamper) استانلس ستيل 58mm',
+        'كابل شبكات Cat6 ياباني أصلي 305 متر',
+        'راوتر سيسكو 2901 احترافي مدمج',
+        'سويتش شبكات 24 منفذ جيجابيت PoE',
+        'كاميرا مراقبة خارجية 5 ميجا بيكسل IP',
+        'جهاز تسجيل شبكي NVR 16 قناة 4K',
+        'خادم ملفات Rack Server 2U الجيل العاشر',
+        'مزود طاقة UPS أونلاين 3000VA',
+        'ألياف ضوئية فايبر أحادي Single-Mode 1000m',
+        'لوحة توزيع كابلات Patch Panel 24 Port Cat6',
+        'كابينة خادم Rack Cabinet 42U مع تهوية'
+      ]);
+
+      const customUserProducts = db.products.filter(p => !oldDefaultNames.has(p.name));
+      
+      // New seed catalog products
+      const newSeedMap = new Map<string, Product>();
+      DEFAULT_CATALOG_PRODUCTS.forEach(p => newSeedMap.set(p.name + '_' + p.category, p));
+
+      // Merge: Start with all 82 verified items
+      const mergedProducts: Product[] = [...DEFAULT_CATALOG_PRODUCTS];
+      
+      // Append any distinct user-created items
+      customUserProducts.forEach(up => {
+        if (!newSeedMap.has(up.name + '_' + up.category)) {
+          mergedProducts.push(up);
+        }
+      });
+
+      db.products = mergedProducts;
+      db.catalogVersion = 'CATALOG_V4_2026_08_NEW_SEED';
+
+      // Clear old dummy movements and create opening balances for new items
+      db.movements = DEFAULT_CATALOG_PRODUCTS.map(p => ({
+        id: `mvt_init_${p.id}`,
+        productId: p.id,
+        productCode: p.code,
+        productName: p.name,
+        type: 'IN' as const,
+        quantity: p.stock,
+        previousStock: 0,
+        newStock: p.stock,
+        reason: `رصيد افتتاحي معتمد في قسم (${p.category})`,
+        operatorName: 'المدير العام',
+        timestamp: p.updatedAt,
+      }));
+
+      writeDB(db);
+    }
 
     // Ensure General Manager email is updated to zenithbabiker@gmail.com
     let updated = false;

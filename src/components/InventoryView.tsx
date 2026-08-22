@@ -119,10 +119,25 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return { totalItems, totalUnits };
   }, [products]);
 
-  // Filter products using Arabic Smart Search Engine
+  // Category Filter State
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+
+  const categoriesList = useMemo(() => {
+    const cats = new Set<string>();
+    products.forEach(p => {
+      if (p.category && p.category.trim()) cats.add(p.category.trim());
+    });
+    return Array.from(cats);
+  }, [products]);
+
+  // Filter products using Arabic Smart Search Engine and Category Filter
   const filteredProducts = useMemo(() => {
-    return searchAndRank(products, searchTerm, (p: Product) => [p.name, p.code]);
-  }, [products, searchTerm]);
+    let list = products;
+    if (selectedCategory !== 'ALL') {
+      list = list.filter(p => p.category === selectedCategory);
+    }
+    return searchAndRank(list, searchTerm, (p: Product) => [p.name, p.code, p.category || '']);
+  }, [products, searchTerm, selectedCategory]);
 
   // Direct Click-to-Add to Side Delivery Cart
   const handleToggleProductCart = (product: Product) => {
@@ -877,6 +892,41 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             )}
           </div>
 
+          {/* Category Filter Pills */}
+          {categoriesList.length > 0 && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('ALL')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition cursor-pointer border ${
+                  selectedCategory === 'ALL'
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                جميع الأقسام ({toArabicNumerals(products.length)})
+              </button>
+              {categoriesList.map(cat => {
+                const count = products.filter(p => p.category === cat).length;
+                const isSelected = selectedCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition cursor-pointer border ${
+                      isSelected
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-blue-50 hover:text-blue-700'
+                    }`}
+                  >
+                    {cat} ({toArabicNumerals(count)})
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* Product List Table with Direct Click-to-Add Behavior */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-3 bg-slate-900 text-white flex items-center justify-between">
@@ -937,9 +987,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                   <Check className="w-3 h-3" />
                                 </span>
                               )}
-                              <p className="font-extrabold text-slate-900 text-xs sm:text-sm leading-snug">
-                                {product.name}
-                              </p>
+                              <div>
+                                <p className="font-extrabold text-slate-900 text-xs sm:text-sm leading-snug">
+                                  {product.name}
+                                </p>
+                                {product.category && (
+                                  <span className="inline-block mt-0.5 text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                                    {product.category}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </td>
 

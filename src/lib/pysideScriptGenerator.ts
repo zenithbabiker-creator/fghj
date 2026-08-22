@@ -1,3 +1,5 @@
+import { DEFAULT_CATALOG_PRODUCTS } from '../data/defaultCatalog';
+
 /**
  * Standalone Native Python PySide6 Launcher Generator for شركة NASSER Desktop (.exe)
  * Uses pure PySide6 QWebEngineView + PySide6.QtPrintSupport (QPrinter, QPrintDialog)
@@ -6,6 +8,18 @@
  */
 
 export function generatePySideScript(): string {
+  const defaultProductsJson = JSON.stringify(DEFAULT_CATALOG_PRODUCTS.map(p => [
+    p.id,
+    p.code,
+    p.name,
+    p.category,
+    p.stock,
+    p.minStock,
+    p.unit,
+    p.description || '',
+    p.updatedAt
+  ]));
+
   return `"""
 ====================================================================
 شركة NASSER - نظام إدارة المخازن والمخزون
@@ -257,39 +271,44 @@ def init_sqlite_db():
                     ('notes', 'TEXT DEFAULT ""')
                 ])
 
-                # تعبئة المنتجات الافتراضية فقط إذا كانت القاعدة جديدة وفارغة تماماً (0 أصناف)
+                # جدول إعدادات النظام وإصدار الكتالوج
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS app_settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    )
+                ''')
+
+                cursor.execute("SELECT value FROM app_settings WHERE key = 'catalog_version'")
+                v_row = cursor.fetchone()
+                current_catalog_version = v_row[0] if v_row else None
+
+                cursor.execute("SELECT COUNT(*) FROM products WHERE name LIKE '%Cat6%' OR name LIKE '%إسبيرسو%' OR name LIKE '%سيسكو%' OR name LIKE '%طاحونة حبوب%'")
+                has_old_dummy_products = cursor.fetchone()[0] > 0
+
                 cursor.execute("SELECT COUNT(*) FROM products")
                 prod_count = cursor.fetchone()[0]
-                if prod_count == 0:
-                    cursor.execute("SELECT COUNT(*) FROM movements")
-                    mov_count = cursor.fetchone()[0]
 
-                    default_products = [
-                        ('prd_1', 'NASSER-101', 'كابل شبكات Cat6 ياباني أصلي 305 متر', 'شبكات وتوصيلات', 45, 10, 'لفة', 'كابل عالي الجودة معزول ضد التداخل والحرارة', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                        ('prd_2', 'NASSER-102', 'راوتر سيسكو 2901 احترافي مدمج', 'أجهزة توجيه', 12, 3, 'قطعة', 'موجه بيانات متعدد المنافذ يدعم VPN والألياف الضوئية', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                        ('prd_3', 'NASSER-103', 'سويتش شبكات 24 منفذ جيجابيت PoE', 'محولات شبكية', 8, 2, 'قطعة', 'مزود طاقة عبر الإيثرنت للكاميرات وأجهزة الاتصال', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                        ('prd_4', 'NASSER-104', 'كاميرا مراقبة خارجية 5 ميجا بيكسل IP', 'أنظمة مراقبة', 28, 5, 'قطعة', 'رؤية ليلية ملونة 40 متر مقاومة للمياه IP67', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                        ('prd_5', 'NASSER-105', 'جهاز تسجيل شبكي NVR 16 قناة 4K', 'أنظمة مراقبة', 6, 2, 'قطعة', 'يدعم تركيب 2 قرص صلب حتى 16 تيرابايت وتطبيق هاتف', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                        ('prd_6', 'NASSER-106', 'خادم ملفات Rack Server 2U الجيل العاشر', 'خوادم وحواسب', 3, 1, 'وحدة', 'معالج Xeon مزدوج، 64GB RAM، 4x2TB SAS RAID-5', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                        ('prd_7', 'NASSER-107', 'مزود طاقة UPS أونلاين 3000VA', 'طاقة وحماية', 7, 2, 'وحدة', 'حماية ضد انقطاع التيار والجهد الزائد بطاريات مدمجة', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                        ('prd_8', 'NASSER-108', 'ألياف ضوئية فايبر أحادي Single-Mode 1000m', 'ألياف ضوئية', 15, 4, 'بكرة', 'مقاوم للظروف الجوية الشديدة، عالي السرعة', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                        ('prd_9', 'NASSER-109', 'لوحة توزيع كابلات Patch Panel 24 Port Cat6', 'ملحقات كبائن', 18, 5, 'قطعة', 'تنظيم وربط خطوط الشبكة في كابينة السيرفر', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                        ('prd_10', 'NASSER-110', 'كابينة خادم Rack Cabinet 42U مع تهوية', 'كبائن وسيرفرات', 4, 1, 'كابينة', 'أبواب زجاجية وأقفال أمان مراوح تبريد وإضاءة داخلية', time.strftime('%Y-%m-%dT%H:%M:%SZ'))
-                    ]
+                # الهجرة إلى الكتالوج الجديد المعتمد (82 صنف)
+                if current_catalog_version != 'CATALOG_V4_2026_08_NEW_SEED' or has_old_dummy_products or prod_count == 0:
+                    cursor.execute("DELETE FROM products WHERE name LIKE '%Cat6%' OR name LIKE '%إسبيرسو%' OR name LIKE '%سيسكو%' OR name LIKE '%طاحونة حبوب%'")
+                    cursor.execute("DELETE FROM movements WHERE reference_no = 'OPENING-INIT' OR reason LIKE '%افتتاحي%'")
+
+                    default_products_list = json.loads('''${defaultProductsJson}''')
                     
-                    cursor.executemany(
-                        "INSERT OR IGNORE INTO products (id, code, name, category, stock, min_stock, unit, description, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        default_products
-                    )
+                    for p in default_products_list:
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO products (id, code, name, category, stock, min_stock, unit, description, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]))
+                        
+                        m_id = f"mvt_init_{p[0]}"
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (m_id, 'OPENING-INIT', p[0], p[1], p[2], 'IN', p[4], 0, p[4], f'رصيد افتتاحي مسجل بالمستودع ({p[3]})', 'المدير العام', p[8]))
 
-                    # حركات افتتاحية افتراضية إذا كان جدول الحركات فارغاً مع منع أي تعارض للمعرفات
-                    if mov_count == 0:
-                        for p in default_products:
-                            m_id = f"mvt_init_{p[0]}"
-                            cursor.execute('''
-                                INSERT OR IGNORE INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (m_id, 'OPENING-INIT', p[0], p[1], p[2], 'IN', p[4], 0, p[4], 'رصيد افتتاحي مسجل بالمستودع', 'المدير العام', p[8]))
+                    cursor.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('catalog_version', 'CATALOG_V4_2026_08_NEW_SEED')")
 
                 # تعبئة حسابات المستخدمين إذا كانت فارغة
                 cursor.execute("SELECT COUNT(*) FROM users")
