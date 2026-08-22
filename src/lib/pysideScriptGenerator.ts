@@ -24,6 +24,7 @@ import os
 import time
 import json
 import re
+import uuid
 import sqlite3
 import threading
 import socket
@@ -104,208 +105,225 @@ def get_db_connection():
     return conn
 
 def init_sqlite_db():
-    """تهيئة قاعدة البيانات وإنشاء الجداول وتفعيل وضع الحفظ الدائم WAL وترقية المخطط (Schema Migration)"""
+    """تهيئة قاعدة البيانات وإنشاء الجداول وتفعيل وضع الحفظ الدائم WAL وترقية المخطط (Schema Migration) بشكل آمن 100%"""
     with DB_LOCK:
-        conn = get_db_connection()
         try:
-            cursor = conn.cursor()
-            
-            # جدول المنتجات
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS products (
-                    id TEXT PRIMARY KEY,
-                    code TEXT UNIQUE NOT NULL,
-                    name TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    stock INTEGER NOT NULL,
-                    min_stock INTEGER DEFAULT 5,
-                    unit TEXT DEFAULT 'وحدة',
-                    description TEXT DEFAULT '',
-                    updated_at TEXT
-                )
-            ''')
-            
-            # جدول الفواتير والمبيعات
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS sales (
-                    id TEXT PRIMARY KEY,
-                    invoice_number TEXT UNIQUE NOT NULL,
-                    created_at TEXT NOT NULL,
-                    customer_name TEXT,
-                    customer_phone TEXT,
-                    cashier_id TEXT,
-                    cashier_name TEXT NOT NULL,
-                    subtotal REAL NOT NULL,
-                    discount REAL DEFAULT 0,
-                    tax REAL DEFAULT 0,
-                    total REAL NOT NULL,
-                    payment_method TEXT NOT NULL,
-                    items_json TEXT NOT NULL,
-                    notes TEXT
-                )
-            ''')
-            
-            # جدول المستخدمين
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id TEXT PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    gmail TEXT,
-                    created_at TEXT
-                )
-            ''')
+            conn = get_db_connection()
+            try:
+                cursor = conn.cursor()
+                
+                # جدول المنتجات
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS products (
+                        id TEXT PRIMARY KEY,
+                        code TEXT UNIQUE NOT NULL,
+                        name TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        stock INTEGER NOT NULL,
+                        min_stock INTEGER DEFAULT 5,
+                        unit TEXT DEFAULT 'وحدة',
+                        description TEXT DEFAULT '',
+                        updated_at TEXT
+                    )
+                ''')
+                
+                # جدول الفواتير والمبيعات
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS sales (
+                        id TEXT PRIMARY KEY,
+                        invoice_number TEXT UNIQUE NOT NULL,
+                        created_at TEXT NOT NULL,
+                        customer_name TEXT,
+                        customer_phone TEXT,
+                        cashier_id TEXT,
+                        cashier_name TEXT NOT NULL,
+                        subtotal REAL NOT NULL,
+                        discount REAL DEFAULT 0,
+                        tax REAL DEFAULT 0,
+                        total REAL NOT NULL,
+                        payment_method TEXT NOT NULL,
+                        items_json TEXT NOT NULL,
+                        notes TEXT
+                    )
+                ''')
+                
+                # جدول المستخدمين
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS users (
+                        id TEXT PRIMARY KEY,
+                        username TEXT UNIQUE NOT NULL,
+                        password TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        gmail TEXT,
+                        created_at TEXT
+                    )
+                ''')
 
-            # جدول سجل التدقيق والمراجعة
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS logs (
-                    id TEXT PRIMARY KEY,
-                    timestamp TEXT NOT NULL,
-                    username TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    details TEXT NOT NULL,
-                    type TEXT NOT NULL
-                )
-            ''')
+                # جدول سجل التدقيق والمراجعة
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS logs (
+                        id TEXT PRIMARY KEY,
+                        timestamp TEXT NOT NULL,
+                        username TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        details TEXT NOT NULL,
+                        type TEXT NOT NULL
+                    )
+                ''')
 
-            # جدول حركات المخزون (تعديل، توريد، صرف، أوامر تسليم)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS movements (
-                    id TEXT PRIMARY KEY,
-                    reference_no TEXT,
-                    product_id TEXT NOT NULL,
-                    product_code TEXT,
-                    product_name TEXT,
-                    type TEXT NOT NULL,
-                    quantity INTEGER NOT NULL,
-                    previous_stock INTEGER,
-                    new_stock INTEGER,
-                    reason TEXT,
-                    operator_name TEXT,
-                    created_at TEXT
-                )
-            ''')
-            
-            # --- ترقية وتحديث المخطط التلقائي (AUTOMATIC SCHEMA MIGRATIONS) لحل أي خطأ بالأعمدة القديمة ---
-            def ensure_columns(table_name, columns_to_check):
+                # جدول حركات المخزون (تعديل، توريد، صرف، أوامر تسليم)
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS movements (
+                        id TEXT PRIMARY KEY,
+                        reference_no TEXT,
+                        product_id TEXT NOT NULL,
+                        product_code TEXT,
+                        product_name TEXT,
+                        type TEXT NOT NULL,
+                        quantity INTEGER NOT NULL,
+                        previous_stock INTEGER,
+                        new_stock INTEGER,
+                        reason TEXT,
+                        operator_name TEXT,
+                        created_at TEXT
+                    )
+                ''')
+
+                # إنشاء فهارس لتحسين سرعة الاستعلامات ومنع البطء
                 try:
-                    cursor.execute(f"PRAGMA table_info({table_name})")
-                    existing = [r[1] for r in cursor.fetchall()]
-                    for col_name, col_def in columns_to_check:
-                        if col_name not in existing:
-                            try:
-                                cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def};")
-                            except Exception as ex:
-                                print(f"Migration: add {col_name} to {table_name}:", ex)
-                except Exception as e:
-                    print(f"Schema check error on {table_name}:", e)
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_movements_pid ON movements (product_id);")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_movements_ref ON movements (reference_no);")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_code ON products (code);")
+                except Exception as iex:
+                    print("Indexes notice:", iex)
+                
+                # --- ترقية وتحديث المخطط التلقائي (AUTOMATIC SCHEMA MIGRATIONS) لحل أي خطأ بالأعمدة القديمة ---
+                def ensure_columns(table_name, columns_to_check):
+                    try:
+                        cursor.execute(f"PRAGMA table_info({table_name})")
+                        existing = [r[1] for r in cursor.fetchall()]
+                        for col_name, col_def in columns_to_check:
+                            if col_name not in existing:
+                                try:
+                                    cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def};")
+                                except Exception as ex:
+                                    print(f"Migration: add {col_name} to {table_name}:", ex)
+                    except Exception as e:
+                        print(f"Schema check error on {table_name}:", e)
 
-            # ترقية جدول حركات المخزون للتأكد من وجود الأعمدة بالكامل
-            ensure_columns('movements', [
-                ('reference_no', 'TEXT DEFAULT ""'),
-                ('product_id', 'TEXT DEFAULT ""'),
-                ('product_code', 'TEXT DEFAULT ""'),
-                ('product_name', 'TEXT DEFAULT ""'),
-                ('type', 'TEXT DEFAULT "OUT"'),
-                ('quantity', 'INTEGER DEFAULT 1'),
-                ('previous_stock', 'INTEGER DEFAULT 0'),
-                ('new_stock', 'INTEGER DEFAULT 0'),
-                ('reason', 'TEXT DEFAULT ""'),
-                ('operator_name', 'TEXT DEFAULT "أمين المخزن"'),
-                ('created_at', 'TEXT DEFAULT ""')
-            ])
+                # ترقية جدول حركات المخزون للتأكد من وجود الأعمدة بالكامل
+                ensure_columns('movements', [
+                    ('reference_no', 'TEXT DEFAULT ""'),
+                    ('product_id', 'TEXT DEFAULT ""'),
+                    ('product_code', 'TEXT DEFAULT ""'),
+                    ('product_name', 'TEXT DEFAULT ""'),
+                    ('type', 'TEXT DEFAULT "OUT"'),
+                    ('quantity', 'INTEGER DEFAULT 1'),
+                    ('previous_stock', 'INTEGER DEFAULT 0'),
+                    ('new_stock', 'INTEGER DEFAULT 0'),
+                    ('reason', 'TEXT DEFAULT ""'),
+                    ('operator_name', 'TEXT DEFAULT "أمين المخزن"'),
+                    ('created_at', 'TEXT DEFAULT ""')
+                ])
 
-            # ترقية جدول المنتجات
-            ensure_columns('products', [
-                ('code', 'TEXT DEFAULT ""'),
-                ('name', 'TEXT DEFAULT ""'),
-                ('category', 'TEXT DEFAULT "عام"'),
-                ('stock', 'INTEGER DEFAULT 0'),
-                ('min_stock', 'INTEGER DEFAULT 5'),
-                ('unit', 'TEXT DEFAULT "وحدة"'),
-                ('description', 'TEXT DEFAULT ""'),
-                ('updated_at', 'TEXT DEFAULT ""')
-            ])
+                # ترقية جدول المنتجات
+                ensure_columns('products', [
+                    ('code', 'TEXT DEFAULT ""'),
+                    ('name', 'TEXT DEFAULT ""'),
+                    ('category', 'TEXT DEFAULT "عام"'),
+                    ('stock', 'INTEGER DEFAULT 0'),
+                    ('min_stock', 'INTEGER DEFAULT 5'),
+                    ('unit', 'TEXT DEFAULT "وحدة"'),
+                    ('description', 'TEXT DEFAULT ""'),
+                    ('updated_at', 'TEXT DEFAULT ""')
+                ])
 
-            # ترقية جدول المبيعات
-            ensure_columns('sales', [
-                ('invoice_number', 'TEXT DEFAULT ""'),
-                ('created_at', 'TEXT DEFAULT ""'),
-                ('customer_name', 'TEXT DEFAULT ""'),
-                ('customer_phone', 'TEXT DEFAULT ""'),
-                ('cashier_id', 'TEXT DEFAULT ""'),
-                ('cashier_name', 'TEXT DEFAULT ""'),
-                ('subtotal', 'REAL DEFAULT 0'),
-                ('discount', 'REAL DEFAULT 0'),
-                ('tax', 'REAL DEFAULT 0'),
-                ('total', 'REAL DEFAULT 0'),
-                ('payment_method', 'TEXT DEFAULT "CASH"'),
-                ('items_json', 'TEXT DEFAULT "[]"'),
-                ('notes', 'TEXT DEFAULT ""')
-            ])
+                # ترقية جدول المبيعات
+                ensure_columns('sales', [
+                    ('invoice_number', 'TEXT DEFAULT ""'),
+                    ('created_at', 'TEXT DEFAULT ""'),
+                    ('customer_name', 'TEXT DEFAULT ""'),
+                    ('customer_phone', 'TEXT DEFAULT ""'),
+                    ('cashier_id', 'TEXT DEFAULT ""'),
+                    ('cashier_name', 'TEXT DEFAULT ""'),
+                    ('subtotal', 'REAL DEFAULT 0'),
+                    ('discount', 'REAL DEFAULT 0'),
+                    ('tax', 'REAL DEFAULT 0'),
+                    ('total', 'REAL DEFAULT 0'),
+                    ('payment_method', 'TEXT DEFAULT "CASH"'),
+                    ('items_json', 'TEXT DEFAULT "[]"'),
+                    ('notes', 'TEXT DEFAULT ""')
+                ])
 
-            # تعبئة المنتجات الافتراضية فقط إذا كانت القاعدة جديدة وفارغة تماماً (0 أصناف)
-            cursor.execute("SELECT COUNT(*) FROM products")
-            if cursor.fetchone()[0] == 0:
-                default_products = [
-                    ('prd_1', 'NASSER-101', 'كابل شبكات Cat6 ياباني أصلي 305 متر', 'شبكات وتوصيلات', 45, 10, 'لفة', 'كابل عالي الجودة معزول ضد التداخل والحرارة', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_2', 'NASSER-102', 'راوتر سيسكو 2901 احترافي مدمج', 'أجهزة توجيه', 12, 3, 'قطعة', 'موجه بيانات متعدد المنافذ يدعم VPN والألياف الضوئية', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_3', 'NASSER-103', 'سويتش شبكات 24 منفذ جيجابيت PoE', 'محولات شبكية', 8, 2, 'قطعة', 'مزود طاقة عبر الإيثرنت للكاميرات وأجهزة الاتصال', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_4', 'NASSER-104', 'كاميرا مراقبة خارجية 5 ميجا بيكسل IP', 'أنظمة مراقبة', 28, 5, 'قطعة', 'رؤية ليلية ملونة 40 متر مقاومة للمياه IP67', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_5', 'NASSER-105', 'جهاز تسجيل شبكي NVR 16 قناة 4K', 'أنظمة مراقبة', 6, 2, 'قطعة', 'يدعم تركيب 2 قرص صلب حتى 16 تيرابايت وتطبيق هاتف', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_6', 'NASSER-106', 'خادم ملفات Rack Server 2U الجيل العاشر', 'خوادم وحواسب', 3, 1, 'وحدة', 'معالج Xeon مزدوج، 64GB RAM، 4x2TB SAS RAID-5', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_7', 'NASSER-107', 'مزود طاقة UPS أونلاين 3000VA', 'طاقة وحماية', 7, 2, 'وحدة', 'حماية ضد انقطاع التيار والجهد الزائد بطاريات مدمجة', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_8', 'NASSER-108', 'ألياف ضوئية فايبر أحادي Single-Mode 1000m', 'ألياف ضوئية', 15, 4, 'بكرة', 'مقاوم للظروف الجوية الشديدة، عالي السرعة', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_9', 'NASSER-109', 'لوحة توزيع كابلات Patch Panel 24 Port Cat6', 'ملحقات كبائن', 18, 5, 'قطعة', 'تنظيم وربط خطوط الشبكة في كابينة السيرفر', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
-                    ('prd_10', 'NASSER-110', 'كابينة خادم Rack Cabinet 42U مع تهوية', 'كبائن وسيرفرات', 4, 1, 'كابينة', 'أبواب زجاجية وأقفال أمان مراوح تبريد وإضاءة داخلية', time.strftime('%Y-%m-%dT%H:%M:%SZ'))
-                ]
-                cursor.executemany(
-                    "INSERT INTO products (id, code, name, category, stock, min_stock, unit, description, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    default_products
-                )
+                # تعبئة المنتجات الافتراضية فقط إذا كانت القاعدة جديدة وفارغة تماماً (0 أصناف)
+                cursor.execute("SELECT COUNT(*) FROM products")
+                prod_count = cursor.fetchone()[0]
+                if prod_count == 0:
+                    cursor.execute("SELECT COUNT(*) FROM movements")
+                    mov_count = cursor.fetchone()[0]
 
-                # حركات افتتاحية افتراضية
-                for p in default_products:
-                    m_id = f"mvt_init_{p[0]}"
-                    cursor.execute('''
-                        INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (m_id, 'OPENING-INIT', p[0], p[1], p[2], 'IN', p[4], 0, p[4], 'رصيد افتتاحي مسجل بالمستودع', 'المدير العام', p[8]))
+                    default_products = [
+                        ('prd_1', 'NASSER-101', 'كابل شبكات Cat6 ياباني أصلي 305 متر', 'شبكات وتوصيلات', 45, 10, 'لفة', 'كابل عالي الجودة معزول ضد التداخل والحرارة', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
+                        ('prd_2', 'NASSER-102', 'راوتر سيسكو 2901 احترافي مدمج', 'أجهزة توجيه', 12, 3, 'قطعة', 'موجه بيانات متعدد المنافذ يدعم VPN والألياف الضوئية', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
+                        ('prd_3', 'NASSER-103', 'سويتش شبكات 24 منفذ جيجابيت PoE', 'محولات شبكية', 8, 2, 'قطعة', 'مزود طاقة عبر الإيثرنت للكاميرات وأجهزة الاتصال', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
+                        ('prd_4', 'NASSER-104', 'كاميرا مراقبة خارجية 5 ميجا بيكسل IP', 'أنظمة مراقبة', 28, 5, 'قطعة', 'رؤية ليلية ملونة 40 متر مقاومة للمياه IP67', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
+                        ('prd_5', 'NASSER-105', 'جهاز تسجيل شبكي NVR 16 قناة 4K', 'أنظمة مراقبة', 6, 2, 'قطعة', 'يدعم تركيب 2 قرص صلب حتى 16 تيرابايت وتطبيق هاتف', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
+                        ('prd_6', 'NASSER-106', 'خادم ملفات Rack Server 2U الجيل العاشر', 'خوادم وحواسب', 3, 1, 'وحدة', 'معالج Xeon مزدوج، 64GB RAM، 4x2TB SAS RAID-5', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
+                        ('prd_7', 'NASSER-107', 'مزود طاقة UPS أونلاين 3000VA', 'طاقة وحماية', 7, 2, 'وحدة', 'حماية ضد انقطاع التيار والجهد الزائد بطاريات مدمجة', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
+                        ('prd_8', 'NASSER-108', 'ألياف ضوئية فايبر أحادي Single-Mode 1000m', 'ألياف ضوئية', 15, 4, 'بكرة', 'مقاوم للظروف الجوية الشديدة، عالي السرعة', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
+                        ('prd_9', 'NASSER-109', 'لوحة توزيع كابلات Patch Panel 24 Port Cat6', 'ملحقات كبائن', 18, 5, 'قطعة', 'تنظيم وربط خطوط الشبكة في كابينة السيرفر', time.strftime('%Y-%m-%dT%H:%M:%SZ')),
+                        ('prd_10', 'NASSER-110', 'كابينة خادم Rack Cabinet 42U مع تهوية', 'كبائن وسيرفرات', 4, 1, 'كابينة', 'أبواب زجاجية وأقفال أمان مراوح تبريد وإضاءة داخلية', time.strftime('%Y-%m-%dT%H:%M:%SZ'))
+                    ]
+                    
+                    cursor.executemany(
+                        "INSERT OR IGNORE INTO products (id, code, name, category, stock, min_stock, unit, description, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        default_products
+                    )
 
-            # تعبئة حسابات المستخدمين إذا كانت فارغة
-            cursor.execute("SELECT COUNT(*) FROM users")
-            if cursor.fetchone()[0] == 0:
-                now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                cursor.execute(
-                    "INSERT INTO users (id, username, password, name, role, gmail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    ('usr_1', 'admin', 'admin123', 'المدير العام - ناصر', 'GENERAL_MANAGER', 'zenithbabiker@gmail.com', now_iso)
-                )
-                cursor.execute(
-                    "INSERT INTO users (id, username, password, name, role, gmail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    ('usr_2', 'wh_manager', 'wh123', 'أمين المخزن الرئيسي - أحمد مصطفى', 'WAREHOUSE_MANAGER', 'warehouse.nasser@gmail.com', now_iso)
-                )
+                    # حركات افتتاحية افتراضية إذا كان جدول الحركات فارغاً مع منع أي تعارض للمعرفات
+                    if mov_count == 0:
+                        for p in default_products:
+                            m_id = f"mvt_init_{p[0]}"
+                            cursor.execute('''
+                                INSERT OR IGNORE INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (m_id, 'OPENING-INIT', p[0], p[1], p[2], 'IN', p[4], 0, p[4], 'رصيد افتتاحي مسجل بالمستودع', 'المدير العام', p[8]))
 
-            conn.commit()
-        finally:
-            conn.close()
+                # تعبئة حسابات المستخدمين إذا كانت فارغة
+                cursor.execute("SELECT COUNT(*) FROM users")
+                if cursor.fetchone()[0] == 0:
+                    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO users (id, username, password, name, role, gmail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        ('usr_1', 'admin', 'admin123', 'المدير العام - ناصر', 'GENERAL_MANAGER', 'zenithbabiker@gmail.com', now_iso)
+                    )
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO users (id, username, password, name, role, gmail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        ('usr_2', 'wh_manager', 'wh123', 'أمين المخزن الرئيسي - أحمد مصطفى', 'WAREHOUSE_MANAGER', 'warehouse.nasser@gmail.com', now_iso)
+                    )
+
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            print("Database initialization non-fatal notice:", e)
 
 # ذاكرة مؤقتة لرموز OTP
 ACTIVE_OTPS = {}
 
 def add_audit_log(username, role, action, details, log_type='INFO'):
-    """تسجيل حركة في سجل التدقيق SQLite"""
+    """تسجيل حركة في سجل التدقيق SQLite مع توليد معرف فريد عشوائي آمن"""
     try:
         with DB_LOCK:
             conn = get_db_connection()
             try:
                 cursor = conn.cursor()
-                log_id = f"log_{int(time.time()*1000)}"
+                log_id = f"log_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
                 timestamp = time.strftime('%Y-%m-%dT%H:%M:%SZ')
                 cursor.execute(
-                    "INSERT INTO logs (id, timestamp, username, role, action, details, type) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT OR IGNORE INTO logs (id, timestamp, username, role, action, details, type) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (log_id, timestamp, username, role, action, details, log_type)
                 )
                 conn.commit()
@@ -655,7 +673,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 stock_val = max(0, int(data.get('stock') or 0))
                 min_stock = max(1, int(data.get('minStock') or 5))
                 now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
-                p_id = f"prd_{int(time.time()*1000)}"
+                p_id = str(data.get('id') or f"prd_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}")
                 
                 with DB_LOCK:
                     conn = get_db_connection()
@@ -680,15 +698,15 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             code = f"{code}-{int(time.time()) % 1000}"
 
                         cursor.execute('''
-                            INSERT INTO products (id, code, name, category, stock, min_stock, unit, description, updated_at)
+                            INSERT OR REPLACE INTO products (id, code, name, category, stock, min_stock, unit, description, updated_at)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (p_id, code, name, category, stock_val, min_stock, unit, desc, now_iso))
 
                         # Opening stock movement if stock > 0
                         if stock_val > 0:
-                            mov_id = f"mvt_{int(time.time()*1000)}"
+                            mov_id = f"mvt_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
                             cursor.execute('''
-                                INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                INSERT OR REPLACE INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             ''', (mov_id, 'OPENING-BAL', p_id, code, name, 'IN', stock_val, 0, stock_val, 'رصيد افتتاحي عند إنشاء الصنف', data.get('username') or 'المدير العام', now_iso))
 
@@ -743,7 +761,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             if cursor.fetchone()[0] > 0:
                                 p_code = f"{p_code}_{int(time.time()) % 1000}_{idx}"
 
-                            p_id = f"prd_{int(time.time()*1000)}_{idx}"
+                            p_id = str(itm.get('id') or f"prd_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}_{idx}")
                             p_cat = itm.get('category') or 'عام'
                             p_unit = itm.get('unit') or 'وحدة'
                             p_desc = itm.get('description') or ''
@@ -751,14 +769,14 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             p_min = max(1, int(itm.get('minStock') or 5))
 
                             cursor.execute('''
-                                INSERT INTO products (id, code, name, category, stock, min_stock, unit, description, updated_at)
+                                INSERT OR REPLACE INTO products (id, code, name, category, stock, min_stock, unit, description, updated_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                             ''', (p_id, p_code, p_name, p_cat, p_stock, p_min, p_unit, p_desc, now_iso))
 
                             if p_stock > 0:
-                                mov_id = f"mvt_{int(time.time()*1000)}_{idx}"
+                                mov_id = f"mvt_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}_{idx}"
                                 cursor.execute('''
-                                    INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                    INSERT OR REPLACE INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 ''', (mov_id, 'BATCH-OPENING', p_id, p_code, p_name, 'IN', p_stock, 0, p_stock, 'رصيد إدخال افتتاحي دفعة واحدة', data.get('username') or 'المدير العام', now_iso))
 
@@ -791,7 +809,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 except Exception:
                     qty = 1
                 
-                mov_id = f"mov_{int(time.time()*1000)}"
+                mov_id = f"mov_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
                 now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
 
                 with DB_LOCK:
@@ -827,7 +845,7 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             new_stock = max(0, qty)
 
                         cursor.execute('''
-                            INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                            INSERT OR REPLACE INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (mov_id, ref_no, actual_id, p_code, p_name, m_type, qty, previous_stock, new_stock, reason_str, op_name, now_iso))
 
@@ -901,9 +919,9 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
                             cursor.execute("UPDATE products SET stock=?, updated_at=? WHERE id=?", (new_stock, now_iso, actual_id))
 
-                            mov_id = f"mov_{int(time.time()*1000)}_{idx}"
+                            mov_id = f"mov_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}_{idx}"
                             cursor.execute('''
-                                INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                INSERT OR REPLACE INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             ''', (mov_id, ref_no, actual_id, p_code, p_name, 'OUT', qty, prev_stock, new_stock, reason_str, op_name, now_iso))
 
@@ -946,11 +964,11 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                         count = cursor.fetchone()[0] + 1
                         invoice_num = f"INV-{time.strftime('%Y%m')}-{count:04d}"
                         
-                        sale_id = f"sale_{int(time.time()*1000)}"
+                        sale_id = f"sale_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
                         created_at = time.strftime('%Y-%m-%dT%H:%M:%SZ')
                         
                         cursor.execute('''
-                            INSERT INTO sales (id, invoice_number, created_at, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, items_json, notes)
+                            INSERT OR REPLACE INTO sales (id, invoice_number, created_at, customer_name, customer_phone, cashier_id, cashier_name, subtotal, discount, tax, total, payment_method, items_json, notes)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             sale_id, invoice_num, created_at,
@@ -1002,14 +1020,14 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if parsed_path == '/api/users':
             try:
                 data = self._read_json_body()
-                u_id = f"usr_{int(time.time()*1000)}"
+                u_id = f"usr_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
                 now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ')
                 with DB_LOCK:
                     conn = get_db_connection()
                     try:
                         cursor = conn.cursor()
                         cursor.execute('''
-                            INSERT INTO users (id, username, password, name, role, gmail, created_at)
+                            INSERT OR REPLACE INTO users (id, username, password, name, role, gmail, created_at)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
                         ''', (u_id, data.get('username'), data.get('password', '123456'), data.get('name'), data.get('role', 'WAREHOUSE_MANAGER'), data.get('gmail', ''), now_iso))
                         conn.commit()
@@ -1044,9 +1062,9 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                             new_stock = int(data.get('stock', old_stock))
                             if new_stock != old_stock:
                                 diff = new_stock - old_stock
-                                mov_id = f"mvt_{int(time.time()*1000)}"
+                                mov_id = f"mvt_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
                                 cursor.execute('''
-                                    INSERT INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
+                                    INSERT OR REPLACE INTO movements (id, reference_no, product_id, product_code, product_name, type, quantity, previous_stock, new_stock, reason, operator_name, created_at)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 ''', (mov_id, 'MANUAL-ADJUST', actual_id, data.get('code', row[1]), data.get('name', row[2]), 'ADJUSTMENT', abs(diff), old_stock, new_stock, f"تعديل يدوي للرصيد ({'+' if diff > 0 else ''}{diff})", data.get('username') or 'المدير العام', now_iso))
 
